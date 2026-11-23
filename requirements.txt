@@ -4,3 +4,6 @@ yfinance
 plotly
 requests
 nselib
+price-action-lib
+numpy
+scipy
