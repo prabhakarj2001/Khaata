@@ -151,6 +151,7 @@ def classify_latest(ticker: str, df: pd.DataFrame) -> Optional[dict]:
         "rsi": rsi,
         "cmf": cmf,
         "return_5d": get_ret(df["Close"], 5),
+        "return_3d": get_ret(df["Close"], 3),
         "sma50": float(row["SMA50"]),
         "sma200": float(row["SMA200"]) if pd.notna(row["SMA200"]) else np.nan,
         "atr14": atr,
