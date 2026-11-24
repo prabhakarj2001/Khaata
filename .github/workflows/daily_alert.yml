@@ -1,25 +1,29 @@
+
 name: Daily Telegram Alerts
+
 on:
   schedule:
-    # 3:45 PM IST is 10:15 AM UTC. This runs every day.
     - cron: '15 10 * * *'
-  workflow_dispatch: # This allows you to click a button to test it manually
+  workflow_dispatch:
 
 jobs:
   run-alerts:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          
+
       - name: Install dependencies
-        run: |
-          pip install pandas yfinance requests ta
-          
+        run: pip install -r requirements.txt
+
       - name: Run alerts script
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python alerts.py
