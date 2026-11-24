@@ -7,3 +7,4 @@ nselib
 price-action-lib
 numpy
 scipy
+ta
