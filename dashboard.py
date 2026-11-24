@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -13,6 +14,7 @@ st.set_page_config(page_title="Market Master Scanner", layout="wide")
 st.title("📈 Ultimate Market & Sector Scanner")
 
 PERIODS = {"1M": 21, "3M": 63, "6M": 126, "1Y": 252, "3Y": 756, "5Y": 1260}
+
 METALS = {
     "Gold": "GC=F",
     "Silver": "SI=F",
@@ -33,6 +35,20 @@ with st.expander("🚨 Current Market Drivers & Risks", expanded=False):
         {"Topic": "Earnings & Valuations", "Detail": "Track earnings growth against market valuations.", "Market Impact": "⚪ Monitor"}
     ]
     st.dataframe(pd.DataFrame(current_topics), use_container_width=True, hide_index=True)
+
+# ==========================================
+# AUTOMATED SCAN TIMESTAMP
+# ==========================================
+@st.cache_data(ttl=60)
+def get_last_scan():
+    try:
+        url = "https://raw.githubusercontent.com/prabhakarj2001/Khaata/main/scan_status.json"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.json().get("last_scan", "Not available")
+    except Exception:
+        return "Not available"
+
 
 # ==========================================
 # TELEGRAM
@@ -397,6 +413,7 @@ if st.button("🚀 Fetch Nifty 500 Data & Build Dashboard", type="primary"):
         f"Successfully scanned {len(results)} stocks."
     )
 
+
 # ==========================================
 # DASHBOARD
 # ==========================================
@@ -407,9 +424,7 @@ if (
 
     df = st.session_state.df
 
-    st.markdown(
-        f"**Last scan:** {datetime.now().strftime('%d %b %Y, %I:%M %p')}"
-    )
+    st.markdown(f"**Last automated scan:** {get_last_scan()}")
 
     c1, c2, c3, c4 = st.columns(4)
 
