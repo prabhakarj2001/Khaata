@@ -103,9 +103,14 @@ def build_alert_message(sig_list, cap):
 # --- SIDEBAR CONTROLS ---
 # ==========================================
 st.sidebar.header("📱 Telegram Alerts")
-# Token lives in .streamlit/secrets.toml (TG_TOKEN, TG_CHAT_ID) -- never hardcode it
-tg_token = st.sidebar.text_input("Bot Token", type="password", value=st.secrets.get("TG_TOKEN", ""))
-tg_chat_id = st.sidebar.text_input("Chat ID", value=st.secrets.get("TG_CHAT_ID", ""))
+def _secret(key, default):
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+tg_token = st.sidebar.text_input("Bot Token", type="password", value=_secret("TG_TOKEN", "9015179938:AAFATXEjxrMZUwPp4csuQO6vmFdae3dBXWE"))
+tg_chat_id = st.sidebar.text_input("Chat ID", value=_secret("TG_CHAT_ID", "1063631401"))
 tg_cap = st.sidebar.slider("Max stocks per alert", 10, 100, 30, step=5,
                            help="Strong Sells fill first. Leftover slots split equally across Strong Buy / Weak Sell / Weak Buy.")
 
