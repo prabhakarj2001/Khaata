@@ -104,7 +104,7 @@ def main():
         lines.extend(["", f"DATA FAILURES ({len(failures)})"])
         lines.extend(failures[:30])
 
-    send_telegram("\\n".join(lines))
+    send_telegram("\n".join(lines))
     print("Scheduled scan completed.")
 
 
