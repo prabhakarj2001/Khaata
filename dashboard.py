@@ -12,6 +12,39 @@ st.set_page_config(page_title="Market Master Scanner", layout="wide")
 st.title("📈 Ultimate Market & Sector Scanner")
 
 # ==========================================
+# --- CURRENT MARKET DRIVERS (LIVE INTELLIGENCE) ---
+# ==========================================
+with st.expander("🚨 Current Market Drivers & Risks (Click to expand)", expanded=False):
+    current_topics = [
+        {
+            "Topic": "Record FPI Inflows", 
+            "Detail": "FPIs poured massive capital into Indian equities recently, marking one of the highest monthly inflows.", 
+            "Market Impact": "🟢 Bullish - Supports large-caps and provides liquidity."
+        },
+        {
+            "Topic": "Inflation & RBI Rate Hikes", 
+            "Detail": "Retail inflation remains a concern. Any hint of an RBI rate hike pressures valuations and borrowing costs.", 
+            "Market Impact": "🔴 Bearish - Rising rates contract liquidity."
+        },
+        {
+            "Topic": "Crude Oil & Geopolitics", 
+            "Detail": "Oil prices remain volatile due to global tensions. Sustained high prices could trigger FII outflows and hurt the Rupee.", 
+            "Market Impact": "🔴 Bearish - Negative for import bill and currency."
+        },
+        {
+            "Topic": "Global AI Stock Rotation", 
+            "Detail": "A sell-off in global tech/AI stocks often drives funds into emerging markets like India as a safe haven.", 
+            "Market Impact": "🟢 Bullish - Short-term tailwind for Indian IT and large-caps."
+        },
+        {
+            "Topic": "Earnings & Valuations", 
+            "Detail": "Markets are watching if corporate earnings can justify current high valuations amid tightening liquidity.", 
+            "Market Impact": "⚪ Neutral - Awaits confirmation from quarterly results."
+        }
+    ]
+    st.dataframe(pd.DataFrame(current_topics), use_container_width=True, hide_index=True)
+
+# ==========================================
 # --- TELEGRAM FUNCTION ---
 # ==========================================
 def send_telegram_message(token, chat_id, message):
@@ -42,7 +75,8 @@ def get_nse_data():
         url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
         df = pd.read_csv(io.StringIO(requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10).text))
         return df['Symbol'].tolist(), dict(zip(df['Symbol'], df['Industry']))
-    except: return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"], {s: "Unknown" for s in ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"]}
+    except: 
+        return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"], {s: "Unknown" for s in ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"]}
 
 @st.cache_data(ttl=86400)
 def get_metadata(symbols, nse_map):
@@ -50,7 +84,9 @@ def get_metadata(symbols, nse_map):
     for sym in symbols:
         sector = nse_map.get(sym.replace(".NS", ""), "Other")
         try:
-            ticker = yf.Ticker(sym if sym.endswith(".NS") else sym + ".NS")
+            # Sanitize ampersand for Yahoo Finance
+            clean_sym = sym.replace("&", "%26")
+            ticker = yf.Ticker(clean_sym if clean_sym.endswith(".NS") else clean_sym + ".NS")
             try: mcap = ticker.fast_info['market_cap']
             except: mcap = ticker.info.get('marketCap', 0)
             try: pe = ticker.info.get('trailingPE', None)
@@ -66,18 +102,23 @@ def get_ret(df, days):
 @st.cache_data(ttl=3600)
 def download_data(symbols, period="5y"):
     all_data = {}
-    for i in range(0, len(symbols), 25): # Chunking
-        chunk = symbols[i:i+25]
-        tickers = [s if s.endswith(".NS") else s + ".NS" for s in chunk]
-        data = yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False)
-        if not data.empty:
-            for s in chunk:
-                tk = s if s.endswith(".NS") else s + ".NS"
-                if isinstance(data.columns, pd.MultiIndex) and tk in data.columns.levels[0]:
-                    all_data[s] = data[tk].dropna()
-                elif not isinstance(data.columns, pd.MultiIndex) and len(chunk) == 1:
-                    all_data[s] = data.dropna()
-        time.sleep(1.2) # Prevent rate limit
+    # Chunk size of 15 prevents rate limits and 'M&M' crashes
+    for i in range(0, len(symbols), 15): 
+        chunk = symbols[i:i+15]
+        tickers = [s.replace("&", "%26") if s.endswith(".NS") else s.replace("&", "%26") + ".NS" for s in chunk]
+        
+        try:
+            data = yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False)
+            if not data.empty:
+                for orig_sym, clean_sym in zip(chunk, tickers):
+                    if isinstance(data.columns, pd.MultiIndex) and clean_sym in data.columns.levels[0]:
+                        df = data[clean_sym].dropna()
+                        if not df.empty: all_data[orig_sym] = df
+                    elif not isinstance(data.columns, pd.MultiIndex) and len(chunk) == 1:
+                        df = data.dropna()
+                        if not df.empty: all_data[orig_sym] = df
+        except: pass
+        time.sleep(1.2) # Pause to prevent blocks
     return all_data
 
 # ==========================================
@@ -121,7 +162,7 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
                 "Momentum": round(float(mom), 1), "Trend": trend, "Vol": vol_spike
             })
         st.session_state.df = pd.DataFrame(results)
-        st.session_state.p_data = p_data # Saved for Buy/Sell tab
+        st.session_state.p_data = p_data 
 
 # ==========================================
 # --- RENDER TABS ---
@@ -130,19 +171,43 @@ if 'df' in st.session_state and not st.session_state.df.empty:
     df = st.session_state.df
     
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "🏆 Top 10", "📊 Scanner", "🏢 Sectors", "🥇 Metals", "📈 Buy/Sell", "📉 Sensex"
+        "📉 Sensex", "🏆 Top 10", "📊 Scanner", "🏢 Sectors", "🥇 Metals", "📈 Buy/Sell"
     ])
 
+    # --- TAB 1: SENSEX ---
     with tab1:
+        st.subheader("📉 Sensex Performance")
+        s_df = yf.download("^BSESN", period="1y", interval="1d", progress=False)
+        if not s_df.empty:
+            if isinstance(s_df.columns, pd.MultiIndex): s_df.columns = s_df.columns.get_level_values(0)
+            fig_s = go.Figure(data=[go.Candlestick(x=s_df.dropna().index, open=s_df['Open'], high=s_df['High'], low=s_df['Low'], close=s_df['Close'])])
+            fig_s.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=400, title="Sensex 1-Year Chart")
+            st.plotly_chart(fig_s, use_container_width=True)
+
+        st.markdown("""
+        <div style="background-color:#2a1a1a; padding:15px; border-radius:10px; border-left:5px solid #FF4B4B; margin-top: 20px;">
+            <h4 style="color:#FF4B4B;">⚠️ Macro-Economic 'Look Out'</h4>
+            <ul style="color:#E0E0E0;">
+                <li><b>RBI Rates:</b> Hikes contract markets, cuts expand them.</li>
+                <li><b>FII Selling:</b> Heavy outflows drag Nifty down.</li>
+                <li><b>Oil Prices:</b> Spikes hurt India's import bill.</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # --- TAB 2: TOP 10 ---
+    with tab2:
         st.subheader("🏆 Top 10 Multi-Period Performers")
         top10 = df.sort_values(by="Momentum", ascending=False).head(10)
         st.dataframe(top10[["Stock", "Sector", "Price", "1M %", "6M %", "1Y %", "3Y %", "5Y %", "Momentum"]], use_container_width=True, hide_index=True)
 
-    with tab2:
+    # --- TAB 3: SCANNER ---
+    with tab3:
         st.subheader(f"Full Market Scanner ({len(df)} stocks)")
         st.dataframe(df.sort_values(by=["Vol", "Momentum"], ascending=[False, False]), use_container_width=True, hide_index=True)
 
-    with tab3:
+    # --- TAB 4: SECTORS ---
+    with tab4:
         st.subheader("Sector Performance (1Y Avg)")
         sec_perf = df.groupby('Sector')['1Y %'].mean().reset_index().sort_values(by='1Y %', ascending=False)
         fig = px.bar(sec_perf, x='Sector', y='1Y %', color='1Y %', color_continuous_scale='RdYlGn')
@@ -151,7 +216,8 @@ if 'df' in st.session_state and not st.session_state.df.empty:
         sel = st.selectbox("Drill Down Sector", sec_perf['Sector'].tolist())
         if sel: st.dataframe(df[df['Sector'] == sel], use_container_width=True, hide_index=True)
 
-    with tab4:
+    # --- TAB 5: METALS ---
+    with tab5:
         st.subheader("🥇 Metals & Fund Flow")
         metals = {'Gold': 'GC=F', 'Silver': 'SI=F', 'Copper': 'HG=F', 'Platinum': 'PL=F', 'Palladium': 'PA=F'}
         metal_data, flow_data = {}, []
@@ -173,7 +239,8 @@ if 'df' in st.session_state and not st.session_state.df.empty:
             fig_m.update_layout(title="Metals (2-Year Trend)", template="plotly_dark", height=350)
             st.plotly_chart(fig_m, use_container_width=True)
 
-    with tab5:
+    # --- TAB 6: BUY/SELL ---
+    with tab6:
         st.subheader("📈 Actionable Signals")
         
         if st.button("📤 Send 3-Day Top 10 Report"):
@@ -194,6 +261,7 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                 for stock in df['Stock'].tolist():
                     df_h = p_data.get(stock)
                     if df_h is None or len(df_h) < 30: continue
+                    
                     rsi = ta.momentum.RSIIndicator(df_h['Close'], window=14).rsi().iloc[-1]
                     macd = ta.trend.MACD(df_h['Close'])
                     ml, ms = macd.macd().iloc[-1], macd.macd_signal().iloc[-1]
@@ -214,12 +282,3 @@ if 'df' in st.session_state and not st.session_state.df.empty:
         
         if 'sig_df' in st.session_state:
             st.dataframe(st.session_state.sig_df, use_container_width=True, hide_index=True)
-
-    with tab6:
-        st.subheader("📉 Sensex Performance")
-        s_df = yf.download("^BSESN", period="1y", interval="1d", progress=False)
-        if not s_df.empty:
-            if isinstance(s_df.columns, pd.MultiIndex): s_df.columns = s_df.columns.get_level_values(0)
-            fig_s = go.Figure(data=[go.Candlestick(x=s_df.dropna().index, open=s_df['Open'], high=s_df['High'], low=s_df['Low'], close=s_df['Close'])])
-            fig_s.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=350)
-            st.plotly_chart(fig_s, use_container_width=True)
