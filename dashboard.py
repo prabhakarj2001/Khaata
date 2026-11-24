@@ -132,7 +132,6 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
                 if market_cap_filter == "Mid Cap (18k-50k Cr)" and (mcap_cr < 18000 or mcap_cr > 50000): continue
                 if market_cap_filter == "Small Cap (<18k Cr)" and mcap_cr > 18000: continue
 
-                # Momentum Averages
                 daily_ret = df['Close'].pct_change().mean() * 100
                 monthly_ret = ((current_price - df['Close'].iloc[-21]) / df['Close'].iloc[-21]) * 100 if len(df) > 21 else 0
                 yearly_ret = ((current_price - df['Close'].iloc[-252]) / df['Close'].iloc[-252]) * 100 if len(df) > 252 else 0
@@ -201,7 +200,6 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                     df_m = df_m.dropna()
                     metal_data[name] = df_m
                     
-                    # Fund Flow Logic (RSI based)
                     rsi = ta.momentum.RSIIndicator(df_m['Close'], window=14).rsi().iloc[-1]
                     status = "🔴 Overbought (Money Out)" if rsi > 70 else ("🟢 Oversold (Money In)" if rsi < 30 else "⚪ Neutral")
                     flow_data.append({"Metal": name, "RSI": round(rsi, 1), "Fund Flow": status})
@@ -223,7 +221,6 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
     with tab6:
         st.subheader("📈 Actionable Signals & Automated Alert Test")
         
-        # New Button to Test the 3-Day Report Manually
         if st.button("📤 Send 3-Day Top 10 & Metals Report to Telegram"):
             with st.spinner("Sending Report..."):
                 top_10 = df_results.sort_values(by="Momentum", ascending=False).head(10)
@@ -231,7 +228,6 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                 for _, row in top_10.iterrows():
                     msg += f"• {row['Stock']} (Score: {row['Momentum']}) - ₹{row['Price']}\n"
                 
-                # Add Metals to message
                 msg += "\n<b>🥇 Metals Fund Flow</b>\n"
                 for item in flow_data:
                     msg += f"• {item['Metal']}: {item['Fund Flow']} (RSI: {item['RSI']})\n"
@@ -242,17 +238,38 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
 
         st.markdown("---")
         st.subheader("Individual Stock Buy/Sell")
+        
         if st.button("🔄 Generate Buy/Sell Alerts"):
-            with st.spinner("Analyzing..."):
-                signal_list, tg_msg = [], "<b>🚨 Daily Buy/Sell Alerts</b>\n\n"
-                for stock in df_results['Stock'].tolist():
+            with st.spinner("Analyzing RSI and MACD for all stocks..."):
+                signal_list = []
+                tg_msg = "<b>🚨 Daily Buy/Sell Alerts</b>\n\n"
+                
+                # --- BULK DOWNLOAD FIX ---
+                stock_list = df_results['Stock'].tolist()
+                tickers = [s + ".NS" for s in stock_list]
+                
+                # Download 3 months of data for ALL stocks in one single request
+                bulk_data = yf.download(tickers, period="3mo", interval="1d", group_by='ticker', progress=False)
+                
+                for stock in stock_list:
                     try:
-                        df_hist = yf.download(stock + ".NS", period="3mo", interval="1d", progress=False)
-                        if isinstance(df_hist.columns, pd.MultiIndex): df_hist.columns = df_hist.columns.get_level_values(0)
+                        ticker_key = stock + ".NS"
+                        # Extract individual stock from the bulk data
+                        if isinstance(bulk_data.columns, pd.MultiIndex):
+                            if ticker_key in bulk_data.columns.levels[0]:
+                                df_hist = bulk_data[ticker_key]
+                            else:
+                                continue
+                        else:
+                            df_hist = bulk_data # If only 1 stock
+                            
                         df_hist = df_hist.dropna()
+                        if len(df_hist) < 30: continue
+                        
                         rsi = ta.momentum.RSIIndicator(df_hist['Close'], window=14).rsi().iloc[-1]
                         macd_obj = ta.trend.MACD(df_hist['Close'])
                         macd_line, macd_signal = macd_obj.macd().iloc[-1], macd_obj.macd_signal().iloc[-1]
+                        price = df_hist['Close'].iloc[-1]
                         
                         if rsi < 40 and macd_line > macd_signal: signal, reason = "🟢 STRONG BUY", "RSI low & MACD up."
                         elif rsi < 40: signal, reason = "🟡 WEAK BUY", "RSI low."
@@ -260,7 +277,7 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                         elif rsi > 60: signal, reason = "🟠 WEAK SELL", "RSI high."
                         else: continue
                         
-                        signal_list.append({"Stock": stock, "Price": round(df_hist['Close'].iloc[-1], 2), "RSI": round(rsi, 1), "Action": signal, "Why?": reason})
+                        signal_list.append({"Stock": stock, "Price": round(price, 2), "RSI": round(rsi, 1), "Action": signal, "Why?": reason})
                         tg_msg += f"<b>{stock}</b>: {signal}\n"
                     except: continue
                 
