@@ -6,7 +6,6 @@ import plotly.express as px
 import requests
 import io
 import time
-from nselib import capital_market
 import ta
 from plotly.subplots import make_subplots
 
@@ -60,7 +59,7 @@ tg_token = st.sidebar.text_input("Bot Token", type="password", value="9015179938
 tg_chat_id = st.sidebar.text_input("Chat ID", value="1063631401")
 
 # ==========================================
-# --- DATA FETCHING (CHUNKED TO AVOID LIMITS) ---
+# --- DATA FETCHING ---
 # ==========================================
 @st.cache_data(ttl=86400)
 def get_nse_data():
@@ -89,26 +88,15 @@ def get_stock_metadata(symbols, nse_sector_map):
         except: meta[sym] = {"Sector": sector, "MarketCap_Cr": 0, "PE": None, "Debt/Equity": None}
     return meta
 
+# Changed to 2y to ensure we have > 252 days for 1-year calculation
 @st.cache_data(ttl=3600)
-def get_fii_dii_data():
-    try:
-        df = capital_market.fii_dii_trading_activity()
-        df = df.rename(columns={'date': 'Date', 'fii_net': 'FII Net (₹ Cr)', 'dii_net': 'DII Net (₹ Cr)'})
-        if 'FII Net (₹ Cr)' in df.columns: df['FII Net (₹ Cr)'] = pd.to_numeric(df['FII Net (₹ Cr)'], errors='coerce')
-        if 'DII Net (₹ Cr)' in df.columns: df['DII Net (₹ Cr)'] = pd.to_numeric(df['DII Net (₹ Cr)'], errors='coerce')
-        return df.tail(7)
-    except: return pd.DataFrame()
-
-# FIXED: Chunked Download Function
-@st.cache_data(ttl=3600)
-def download_price_data(symbols, period="1y"):
+def download_price_data(symbols, period="2y"):
     all_data = {}
-    chunk_size = 50
+    chunk_size = 25 # Smaller chunks to avoid limits
     for i in range(0, len(symbols), chunk_size):
         chunk = symbols[i:i+chunk_size]
         chunk_tickers = [s if s.endswith(".NS") else s + ".NS" for s in chunk]
         
-        # Pass as a list to avoid URL length limits
         data = yf.download(chunk_tickers, period=period, interval="1d", group_by='ticker', progress=False)
         
         if not data.empty:
@@ -119,10 +107,9 @@ def download_price_data(symbols, period="1y"):
                         if ticker_key in data.columns.levels[0]:
                             all_data[s] = data[ticker_key].dropna()
                     else:
-                        all_data[s] = data.dropna() # Fallback for single ticker
-                except:
-                    pass
-        time.sleep(1) # Pause for 1 second to prevent rate limits
+                        all_data[s] = data.dropna() 
+                except: pass
+        time.sleep(1.5) # Pause to avoid blocks
     return all_data
 
 # ==========================================
@@ -134,8 +121,8 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
     elif scan_size == "Nifty 100": target_symbols = all_symbols[:100]
     else: target_symbols = all_symbols
 
-    with st.spinner(f"Downloading Data for {len(target_symbols)} stocks in batches..."):
-        price_data = download_price_data(target_symbols, period="1y")
+    with st.spinner(f"Downloading 2-Year Data for {len(target_symbols)} stocks in batches..."):
+        price_data = download_price_data(target_symbols, period="2y")
         meta_map = get_stock_metadata(target_symbols, nse_sector_map)
         
         results = []
@@ -171,7 +158,6 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
                 })
             except: continue 
         st.session_state.df_results = pd.DataFrame(results)
-        st.session_state.price_data = price_data # Save for Tab 6
 
 # ==========================================
 # --- RENDER TABS ---
@@ -179,8 +165,9 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
 if 'df_results' in st.session_state and not st.session_state.df_results.empty:
     df_results = st.session_state.df_results
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "🏆 Top 10 Momentum", "📊 Scanner", "🏢 Sectors", "🏦 FII/DII", "🥇 Metals & Fund Flow", "📈 Buy/Sell", "📉 Sensex"
+    # Removed FII/DII Tab (6 Tabs now)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🏆 Top 10 Momentum", "📊 Scanner", "🏢 Sectors", "🥇 Metals & Fund Flow", "📈 Buy/Sell", "📉 Sensex"
     ])
 
     with tab1:
@@ -202,12 +189,6 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         if sel_sector: st.dataframe(df_results[df_results['Sector'] == sel_sector], use_container_width=True, hide_index=True)
 
     with tab4:
-        st.subheader("FII / DII Flows (Last 7 Days)")
-        fii_dii_df = get_fii_dii_data()
-        if not fii_dii_df.empty:
-            st.dataframe(fii_dii_df, use_container_width=True, hide_index=True)
-
-    with tab5:
         st.subheader("🥇 Metals Performance & Fund Flow")
         metals = {'Gold': 'GC=F', 'Silver': 'SI=F', 'Copper': 'HG=F', 'Platinum': 'PL=F', 'Palladium': 'PA=F'}
         metal_data, flow_data = {}, []
@@ -238,7 +219,7 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
             fig_metal.update_layout(title="Metals (2-Year Trend)", template="plotly_dark", height=400)
             st.plotly_chart(fig_metal, use_container_width=True)
 
-    with tab6:
+    with tab5:
         st.subheader("📈 Actionable Signals")
         
         if st.button("📤 Send 3-Day Top 10 & Metals Report to Telegram"):
@@ -260,16 +241,35 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         st.subheader("Individual Stock Buy/Sell")
         
         if st.button("🔄 Generate Buy/Sell Alerts"):
-            with st.spinner("Analyzing RSI and MACD..."):
+            with st.spinner("Analyzing RSI and MACD for all stocks..."):
                 signal_list = []
                 tg_msg = "<b>🚨 Daily Buy/Sell Alerts</b>\n\n"
                 
-                # USE THE ALREADY DOWNLOADED DATA FROM MEMORY
-                price_data = st.session_state.price_data
+                # FIXED: Dedicated chunked download for signals to prevent truncation at 'M'
+                stock_list = df_results['Stock'].tolist()
+                bulk_signals_data = {}
+                chunk_size = 25
                 
-                for stock in df_results['Stock'].tolist():
+                for i in range(0, len(stock_list), chunk_size):
+                    chunk = stock_list[i:i+chunk_size]
+                    tickers = [s + ".NS" for s in chunk]
+                    data = yf.download(tickers, period="3mo", interval="1d", group_by='ticker', progress=False)
+                    
+                    if not data.empty:
+                        for s in chunk:
+                            try:
+                                if isinstance(data.columns, pd.MultiIndex):
+                                    if s + ".NS" in data.columns.levels[0]:
+                                        bulk_signals_data[s] = data[s + ".NS"].dropna()
+                                else:
+                                    bulk_signals_data[s] = data.dropna()
+                            except: pass
+                    time.sleep(1.5)
+                
+                # Analyze the downloaded data
+                for stock in stock_list:
                     try:
-                        df_hist = price_data.get(stock)
+                        df_hist = bulk_signals_data.get(stock)
                         if df_hist is None or df_hist.empty or len(df_hist) < 30: continue
                         
                         rsi = ta.momentum.RSIIndicator(df_hist['Close'], window=14).rsi().iloc[-1]
@@ -295,12 +295,23 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         if 'signal_df' in st.session_state and not st.session_state.signal_df.empty:
             st.dataframe(st.session_state.signal_df, use_container_width=True, hide_index=True)
 
-    with tab7:
+    with tab6:
         st.subheader("📉 S&P BSE SENSEX Performance")
-        sensex_df = yf.download("^BSESN", period="1y", interval="1d", progress=False)
+        sensex_df = yf.download("^BSESN", period="2y", interval="1d", progress=False)
         if not sensex_df.empty:
             if isinstance(sensex_df.columns, pd.MultiIndex): sensex_df.columns = sensex_df.columns.get_level_values(0)
             sensex_df = sensex_df.dropna()
             fig_sensex = go.Figure(data=[go.Candlestick(x=sensex_df.index, open=sensex_df['Open'], high=sensex_df['High'], low=sensex_df['Low'], close=sensex_df['Close'])])
             fig_sensex.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=400)
             st.plotly_chart(fig_sensex, use_container_width=True)
+            
+        st.markdown("""
+        <div style="background-color:#2a1a1a; padding:15px; border-radius:10px; border-left:5px solid #FF4B4B; margin-top: 20px;">
+            <h4 style="color:#FF4B4B;">⚠️ Macro-Economic 'Look Out'</h4>
+            <ul style="color:#E0E0E0;">
+                <li><b>RBI Rates:</b> Hikes contract markets, cuts expand them.</li>
+                <li><b>FII Selling:</b> Heavy outflows drag Nifty down.</li>
+                <li><b>Oil Prices:</b> Spikes hurt India's import bill.</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
