@@ -13,7 +13,7 @@ st.set_page_config(page_title="Market Master Scanner", layout="wide")
 st.title("📈 Ultimate Market & Sector Scanner")
 
 # ==========================================
-# --- TELEGRAM ALERT FUNCTION ---
+# --- TELEGRAM FUNCTION ---
 # ==========================================
 def send_telegram_message(token, chat_id, message):
     try:
@@ -29,9 +29,7 @@ def send_telegram_message(token, chat_id, message):
 def detect_pattern(row):
     try:
         o, h, l, c = row['Open'], row['High'], row['Low'], row['Close']
-        body = abs(c - o)
-        upper_wick = h - max(o, c)
-        lower_wick = min(o, c) - l
+        body = abs(c - o); upper_wick = h - max(o, c); lower_wick = min(o, c) - l
         total_range = h - l
         if total_range == 0: return "None"
         if body <= (total_range * 0.1): return "Doji"
@@ -56,13 +54,12 @@ st.sidebar.header("Scanner Settings")
 scan_size = st.sidebar.selectbox("How many stocks to scan?", ["Nifty 50 (Fast)", "Nifty 100", "Nifty 500 (Slow)"], index=1)
 market_cap_filter = st.sidebar.selectbox("Filter by Market Cap", ["All Stocks", "Large Cap (>50k Cr)", "Mid Cap (18k-50k Cr)", "Small Cap (<18k Cr)"], index=0)
 
-st.sidebar.header("📱 Telegram Alerts (Saved)")
-# PERMANENTLY SAVED CREDENTIALS
-tg_token = st.sidebar.text_input("Telegram Bot Token", type="password", value="9015179938:AAFATXEjxrMZUwPp4csuQO6vmFdae3dBXWE")
-tg_chat_id = st.sidebar.text_input("Telegram Chat ID", value="1063631401")
+st.sidebar.header("📱 Telegram Alerts")
+tg_token = st.sidebar.text_input("Bot Token", type="password", value="9015179938:AAFATXEjxrMZUwPp4csuQO6vmFdae3dBXWE")
+tg_chat_id = st.sidebar.text_input("Chat ID", value="1063631401")
 
 # ==========================================
-# --- DATA FETCHING FUNCTIONS ---
+# --- DATA FETCHING ---
 # ==========================================
 @st.cache_data(ttl=86400)
 def get_nse_data():
@@ -71,8 +68,7 @@ def get_nse_data():
         response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
         df = pd.read_csv(io.StringIO(response.text))
         return df['Symbol'].tolist(), dict(zip(df['Symbol'], df['Industry']))
-    except:
-        return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN"], {s: "Unknown" for s in ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN"]}
+    except: return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"], {s: "Unknown" for s in ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"]}
 
 @st.cache_data(ttl=86400)
 def get_stock_metadata(symbols, nse_sector_map):
@@ -84,13 +80,10 @@ def get_stock_metadata(symbols, nse_sector_map):
             try: mcap = ticker.fast_info['market_cap']
             except: mcap = ticker.info.get('marketCap', 0)
             mcap_cr = mcap / 10000000 if mcap else 0
-            
             try:
                 info = ticker.info
-                pe = info.get('trailingPE', None)
-                debt = info.get('debtToEquity', None)
+                pe, debt = info.get('trailingPE', None), info.get('debtToEquity', None)
             except: pe, debt = None, None
-                
             meta[sym] = {"Sector": sector, "MarketCap_Cr": mcap_cr, "PE": round(pe, 1) if pe else None, "Debt/Equity": round(debt, 1) if debt else None}
         except: meta[sym] = {"Sector": sector, "MarketCap_Cr": 0, "PE": None, "Debt/Equity": None}
     return meta
@@ -106,7 +99,7 @@ def get_fii_dii_data():
     except: return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
-def download_price_data(symbols, period="5y"):
+def download_price_data(symbols, period="1y"):
     tickers = " ".join([s if s.endswith(".NS") else s + ".NS" for s in symbols])
     return yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False)
 
@@ -115,14 +108,12 @@ def download_price_data(symbols, period="5y"):
 # ==========================================
 if st.button("🚀 Fetch Data & Build Dashboard"):
     all_symbols, nse_sector_map = get_nse_data()
-    small_cap_etfs = ["HDFCSML250.NS", "MOSMALL250.NS"]
-    
-    if scan_size == "Nifty 50 (Fast)": target_symbols = list(set(all_symbols[:50] + small_cap_etfs))
-    elif scan_size == "Nifty 100": target_symbols = list(set(all_symbols[:100] + small_cap_etfs))
-    else: target_symbols = list(set(all_symbols + small_cap_etfs))
+    if scan_size == "Nifty 50 (Fast)": target_symbols = all_symbols[:50]
+    elif scan_size == "Nifty 100": target_symbols = all_symbols[:100]
+    else: target_symbols = all_symbols
 
-    with st.spinner(f"Downloading Data & Fundamentals for {len(target_symbols)} stocks..."):
-        price_data = download_price_data(target_symbols, period="5y")
+    with st.spinner(f"Downloading Data for {len(target_symbols)} stocks..."):
+        price_data = download_price_data(target_symbols, period="1y")
         meta_map = get_stock_metadata(target_symbols, nse_sector_map)
         
         results = []
@@ -141,14 +132,11 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
                 if market_cap_filter == "Mid Cap (18k-50k Cr)" and (mcap_cr < 18000 or mcap_cr > 50000): continue
                 if market_cap_filter == "Small Cap (<18k Cr)" and mcap_cr > 18000: continue
 
-                # TIMEFRAMES
-                ret_1m = ((current_price - df['Close'].iloc[-21]) / df['Close'].iloc[-21]) * 100 if len(df) > 21 else 0
-                ret_6m = ((current_price - df['Close'].iloc[-126]) / df['Close'].iloc[-126]) * 100 if len(df) > 126 else 0
-                ret_1y = ((current_price - df['Close'].iloc[-252]) / df['Close'].iloc[-252]) * 100 if len(df) > 252 else 0
-                price_3y = df['Close'].iloc[-756] if len(df) > 756 else df['Close'].iloc[0]
-                ret_3y = ((current_price - price_3y) / price_3y) * 100
-                price_5y = df['Close'].iloc[0]
-                ret_5y = ((current_price - price_5y) / price_5y) * 100
+                # Momentum Averages
+                daily_ret = df['Close'].pct_change().mean() * 100
+                monthly_ret = ((current_price - df['Close'].iloc[-21]) / df['Close'].iloc[-21]) * 100 if len(df) > 21 else 0
+                yearly_ret = ((current_price - df['Close'].iloc[-252]) / df['Close'].iloc[-252]) * 100 if len(df) > 252 else 0
+                momentum_score = (daily_ret * 0.2) + (monthly_ret * 0.3) + (yearly_ret * 0.5)
 
                 final_pattern = detect_pattern(df.iloc[-1]) if detect_pattern(df.iloc[-1]) != "Normal" else detect_engulfing(df)
                 sma_50 = df['Close'].rolling(50).mean().iloc[-1]
@@ -156,39 +144,137 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
                 volume_spike = "🚨 SPIKE" if df['Volume'].iloc[-1] > (2 * df['Volume'].rolling(20).mean().iloc[-1]) else "Normal"
 
                 results.append({
-                    "Stock": symbol.replace(".NS", ""),
-                    "Sector": meta.get("Sector", "Other"),
-                    "MCap (Cr)": round(mcap_cr, 0),
-                    "P/E": meta.get("PE"),
-                    "Debt/Eq": meta.get("Debt/Equity"),
-                    "Price": round(float(current_price), 2),
-                    "1M %": round(float(ret_1m), 1),
-                    "6M %": round(float(ret_6m), 1),
-                    "1Y %": round(float(ret_1y), 1),
-                    "3Y %": round(float(ret_3y), 1),
-                    "5Y %": round(float(ret_5y), 1),
-                    "Trend": trend,
-                    "Pattern": final_pattern,
-                    "Volume": volume_spike
+                    "Stock": symbol.replace(".NS", ""), "Sector": meta.get("Sector", "Other"),
+                    "MCap (Cr)": round(mcap_cr, 0), "P/E": meta.get("PE"), "Debt/Eq": meta.get("Debt/Equity"),
+                    "Price": round(float(current_price), 2), "Daily %": round(float(daily_ret), 2), 
+                    "Monthly %": round(float(monthly_ret), 1), "Yearly %": round(float(yearly_ret), 1),
+                    "Momentum": round(float(momentum_score), 1), "Trend": trend, "Pattern": final_pattern, "Volume": volume_spike
                 })
             except: continue 
         st.session_state.df_results = pd.DataFrame(results)
 
 # ==========================================
-# --- RENDER DASHBOARD TABS ---
+# --- RENDER TABS ---
 # ==========================================
 if 'df_results' in st.session_state and not st.session_state.df_results.empty:
     df_results = st.session_state.df_results
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📉 Sensex & Macro", "📊 Stock Scanner", "🏢 Sector Analysis", 
-        "🏦 Institutional Flow", "🥇 Metals", "📈 Actionable Buy/Sell"
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "🏆 Top 10 Momentum", "📊 Scanner", "🏢 Sectors", "🏦 FII/DII", "🥇 Metals & Fund Flow", "📈 Buy/Sell", "📉 Sensex"
     ])
 
-    # --- TAB 1: SENSEX & MACRO ---
     with tab1:
+        st.subheader("🏆 Top 10 Performers (Composite Momentum)")
+        st.write("Score combines Daily, Monthly, and Yearly returns.")
+        top_10 = df_results.sort_values(by="Momentum", ascending=False).head(10)
+        st.dataframe(top_10[["Stock", "Sector", "Price", "Daily %", "Monthly %", "Yearly %", "Momentum", "Trend"]], use_container_width=True, hide_index=True)
+
+    with tab2:
+        st.subheader(f"Full Scanner ({len(df_results)} stocks)")
+        st.dataframe(df_results.sort_values(by=["Volume", "Momentum"], ascending=[False, False]), use_container_width=True, hide_index=True)
+
+    with tab3:
+        st.subheader("Sector Performance")
+        sector_perf = df_results.groupby('Sector')['Yearly %'].mean().reset_index().sort_values(by='Yearly %', ascending=False)
+        fig_sector = px.bar(sector_perf, x='Sector', y='Yearly %', color='Yearly %', color_continuous_scale='RdYlGn')
+        fig_sector.update_layout(template="plotly_dark")
+        st.plotly_chart(fig_sector, use_container_width=True)
+        sel_sector = st.selectbox("Drill Down Sector", sector_perf['Sector'].tolist())
+        if sel_sector: st.dataframe(df_results[df_results['Sector'] == sel_sector], use_container_width=True, hide_index=True)
+
+    with tab4:
+        st.subheader("FII / DII Flows (Last 7 Days)")
+        fii_dii_df = get_fii_dii_data()
+        if not fii_dii_df.empty:
+            st.dataframe(fii_dii_df, use_container_width=True, hide_index=True)
+
+    with tab5:
+        st.subheader("🥇 Metals Performance & Fund Flow")
+        metals = {'Gold': 'GC=F', 'Silver': 'SI=F', 'Copper': 'HG=F', 'Platinum': 'PL=F', 'Palladium': 'PA=F'}
+        metal_data, flow_data = {}, []
+        
+        for name, ticker in metals.items():
+            try:
+                df_m = yf.download(ticker, period="2y", interval="1d", progress=False)
+                if not df_m.empty:
+                    if isinstance(df_m.columns, pd.MultiIndex): df_m.columns = df_m.columns.get_level_values(0)
+                    df_m = df_m.dropna()
+                    metal_data[name] = df_m
+                    
+                    # Fund Flow Logic (RSI based)
+                    rsi = ta.momentum.RSIIndicator(df_m['Close'], window=14).rsi().iloc[-1]
+                    status = "🔴 Overbought (Money Out)" if rsi > 70 else ("🟢 Oversold (Money In)" if rsi < 30 else "⚪ Neutral")
+                    flow_data.append({"Metal": name, "RSI": round(rsi, 1), "Fund Flow": status})
+            except: pass
+            
+        if metal_data:
+            st.markdown("### Money Flow Analysis (RSI-Based)")
+            st.dataframe(pd.DataFrame(flow_data), use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            st.markdown("### Metal Price Comparison")
+            normalized_df = pd.DataFrame({name: (df_m['Close'] / df_m['Close'].iloc[0]) * 100 for name, df_m in metal_data.items()})
+            fig_metal = go.Figure()
+            for col in normalized_df.columns:
+                fig_metal.add_trace(go.Scatter(x=normalized_df.index, y=normalized_df[col], mode='lines', name=col))
+            fig_metal.update_layout(title="Metals (2-Year Trend)", template="plotly_dark", height=400)
+            st.plotly_chart(fig_metal, use_container_width=True)
+
+    with tab6:
+        st.subheader("📈 Actionable Signals & Automated Alert Test")
+        
+        # New Button to Test the 3-Day Report Manually
+        if st.button("📤 Send 3-Day Top 10 & Metals Report to Telegram"):
+            with st.spinner("Sending Report..."):
+                top_10 = df_results.sort_values(by="Momentum", ascending=False).head(10)
+                msg = "<b>🚨 3-Day Market Report</b>\n\n<b>🏆 Top 10 Momentum Stocks</b>\n"
+                for _, row in top_10.iterrows():
+                    msg += f"• {row['Stock']} (Score: {row['Momentum']}) - ₹{row['Price']}\n"
+                
+                # Add Metals to message
+                msg += "\n<b>🥇 Metals Fund Flow</b>\n"
+                for item in flow_data:
+                    msg += f"• {item['Metal']}: {item['Fund Flow']} (RSI: {item['RSI']})\n"
+                
+                success, err = send_telegram_message(tg_token, tg_chat_id, msg)
+                if success: st.success("✅ 3-Day Report sent to Telegram!")
+                else: st.error(f"❌ Error: {err}")
+
+        st.markdown("---")
+        st.subheader("Individual Stock Buy/Sell")
+        if st.button("🔄 Generate Buy/Sell Alerts"):
+            with st.spinner("Analyzing..."):
+                signal_list, tg_msg = [], "<b>🚨 Daily Buy/Sell Alerts</b>\n\n"
+                for stock in df_results['Stock'].tolist():
+                    try:
+                        df_hist = yf.download(stock + ".NS", period="3mo", interval="1d", progress=False)
+                        if isinstance(df_hist.columns, pd.MultiIndex): df_hist.columns = df_hist.columns.get_level_values(0)
+                        df_hist = df_hist.dropna()
+                        rsi = ta.momentum.RSIIndicator(df_hist['Close'], window=14).rsi().iloc[-1]
+                        macd_obj = ta.trend.MACD(df_hist['Close'])
+                        macd_line, macd_signal = macd_obj.macd().iloc[-1], macd_obj.macd_signal().iloc[-1]
+                        
+                        if rsi < 40 and macd_line > macd_signal: signal, reason = "🟢 STRONG BUY", "RSI low & MACD up."
+                        elif rsi < 40: signal, reason = "🟡 WEAK BUY", "RSI low."
+                        elif rsi > 60 and macd_line < macd_signal: signal, reason = "🔴 STRONG SELL", "RSI high & MACD down."
+                        elif rsi > 60: signal, reason = "🟠 WEAK SELL", "RSI high."
+                        else: continue
+                        
+                        signal_list.append({"Stock": stock, "Price": round(df_hist['Close'].iloc[-1], 2), "RSI": round(rsi, 1), "Action": signal, "Why?": reason})
+                        tg_msg += f"<b>{stock}</b>: {signal}\n"
+                    except: continue
+                
+                if signal_list:
+                    st.session_state.signal_df = pd.DataFrame(signal_list)
+                    send_telegram_message(tg_token, tg_chat_id, tg_msg)
+                else: st.info("Neutral market. No signals.")
+
+        if 'signal_df' in st.session_state and not st.session_state.signal_df.empty:
+            st.dataframe(st.session_state.signal_df, use_container_width=True, hide_index=True)
+
+    with tab7:
         st.subheader("📉 S&P BSE SENSEX Performance")
-        sensex_df = yf.download("^BSESN", period="5y", interval="1d", progress=False)
+        sensex_df = yf.download("^BSESN", period="1y", interval="1d", progress=False)
         if not sensex_df.empty:
             if isinstance(sensex_df.columns, pd.MultiIndex): sensex_df.columns = sensex_df.columns.get_level_values(0)
             sensex_df = sensex_df.dropna()
@@ -196,161 +282,13 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
             fig_sensex.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=400)
             st.plotly_chart(fig_sensex, use_container_width=True)
             
-        st.markdown("---")
-        st.subheader("⚠️ Macro-Economic 'Look Out' (Booms & Busts)")
         st.markdown("""
-        <div style="background-color:#2a1a1a; padding:15px; border-radius:10px; border-left:5px solid #FF4B4B;">
-            <h4 style="color:#FF4B4B; margin-top:0;">What to watch out for before buying:</h4>
+        <div style="background-color:#2a1a1a; padding:15px; border-radius:10px; border-left:5px solid #FF4B4B; margin-top: 20px;">
+            <h4 style="color:#FF4B4B;">⚠️ Macro-Economic 'Look Out'</h4>
             <ul style="color:#E0E0E0;">
-                <li><b>Interest Rates (RBI):</b> If RBI increases rates, borrowing becomes expensive. Markets usually fall. If rates are cut, markets boom.</li>
-                <li><b>FII Flows (Foreign Money):</b> If foreigners are selling heavily for weeks, the market will drop. Wait for them to turn green before buying.</li>
-                <li><b>Global Geopolitics:</b> Wars or US-China tensions cause oil prices to spike. High oil = bad for India.</li>
-                <li><b>Election Cycles:</b> 3-6 months before major elections, markets are highly volatile.</li>
+                <li><b>RBI Rates:</b> Hikes contract markets, cuts expand them.</li>
+                <li><b>FII Selling:</b> Heavy outflows drag Nifty down.</li>
+                <li><b>Oil Prices:</b> Spikes hurt India's import bill.</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
-
-    # --- TAB 2: STOCK SCANNER ---
-    with tab2:
-        st.subheader("🏆 Top 10 All-Time Performers (Based on 3Y & 5Y Returns)")
-        top_10 = df_results.sort_values(by=["5Y %", "3Y %", "1Y %"], ascending=False).head(10)
-        st.dataframe(top_10[["Stock", "Sector", "Price", "1Y %", "3Y %", "5Y %"]], use_container_width=True, hide_index=True)
-
-        st.markdown("---")
-        st.subheader(f"Full Market Scanner (Found {len(df_results)} stocks)")
-        st.dataframe(
-            df_results.sort_values(by=["Volume", "Trend"], ascending=[False, True])[["Stock", "Sector", "MCap (Cr)", "P/E", "Debt/Eq", "Price", "1M %", "6M %", "1Y %", "3Y %", "5Y %", "Trend", "Pattern", "Volume"]],
-            use_container_width=True, hide_index=True
-        )
-
-    # --- TAB 3: SECTOR ANALYSIS ---
-    with tab3:
-        st.subheader("🏆 Sector Performance")
-        sector_perf = df_results.groupby('Sector')['1Y %'].mean().reset_index()
-        sector_perf = sector_perf.sort_values(by='1Y %', ascending=False)
-        fig_sector = px.bar(sector_perf, x='Sector', y='1Y %', color='1Y %', color_continuous_scale='RdYlGn')
-        fig_sector.update_layout(template="plotly_dark")
-        st.plotly_chart(fig_sector, use_container_width=True)
-        
-        st.markdown("---")
-        selected_sector = st.selectbox("Drill Down: Select a Sector", sector_perf['Sector'].tolist())
-        if selected_sector:
-            sector_stocks = df_results[df_results['Sector'] == selected_sector].sort_values(by="1Y %", ascending=False)
-            st.dataframe(sector_stocks[["Stock", "MCap (Cr)", "1M %", "1Y %", "Trend", "Pattern"]], use_container_width=True, hide_index=True)
-
-    # --- TAB 4: INSTITUTIONAL FLOW ---
-    with tab4:
-        st.subheader("🏦 FII/DII Activity (Last 7 Days)")
-        fii_dii_df = get_fii_dii_data()
-        if not fii_dii_df.empty:
-            st.dataframe(fii_dii_df, use_container_width=True, hide_index=True)
-            date_col = 'Date' if 'Date' in fii_dii_df.columns else fii_dii_df.index
-            if 'FII Net (₹ Cr)' in fii_dii_df.columns:
-                fig_flow = go.Figure()
-                fig_flow.add_trace(go.Bar(x=date_col, y=fii_dii_df['FII Net (₹ Cr)'], name='FII Net', marker_color='orange'))
-                if 'DII Net (₹ Cr)' in fii_dii_df.columns:
-                    fig_flow.add_trace(go.Bar(x=date_col, y=fii_dii_df['DII Net (₹ Cr)'], name='DII Net', marker_color='cyan'))
-                fig_flow.update_layout(barmode='group', template='plotly_dark')
-                st.plotly_chart(fig_flow, use_container_width=True)
-        else:
-            st.warning("Could not load FII/DII data right now.")
-
-    # --- TAB 5: METALS ---
-    with tab5:
-        st.subheader("🥇 Metal Comparison")
-        metals = {'Gold': 'GC=F', 'Silver': 'SI=F', 'Copper': 'HG=F', 'Platinum': 'PL=F', 'Palladium': 'PA=F'}
-        metal_df = pd.DataFrame()
-        for name, ticker in metals.items():
-            try:
-                df_m = yf.download(ticker, period="10y", interval="1d", progress=False)
-                if not df_m.empty:
-                    metal_df[name] = df_m['Close'].iloc[:, 0] if isinstance(df_m.columns, pd.MultiIndex) else df_m['Close']
-            except: pass
-            
-        if not metal_df.empty:
-            normalized_df = (metal_df / metal_df.iloc[0]) * 100
-            metal_time = st.select_slider("Timeframe", options=["1M", "6M", "1Y", "3Y", "5Y", "10Y"], value="5Y")
-            days_map = {"1M": 21, "6M": 126, "1Y": 252, "3Y": 756, "5Y": 1260, "10Y": 2520}
-            plot_metals = normalized_df.tail(days_map[metal_time]) if len(normalized_df) > days_map[metal_time] else normalized_df
-            
-            fig_metal = go.Figure()
-            for col in plot_metals.columns:
-                fig_metal.add_trace(go.Scatter(x=plot_metals.index, y=plot_metals[col], mode='lines', name=col))
-            fig_metal.update_layout(title=f"Metal Performance ({metal_time})", template="plotly_dark", height=500)
-            st.plotly_chart(fig_metal, use_container_width=True)
-        else:
-            st.warning("Could not load metal data.")
-
-    # --- TAB 6: BUY/SELL & TELEGRAM ---
-    with tab6:
-        st.subheader("📈 Actionable Buy/Sell Signals")
-        if st.button("🔄 Generate & Send Alerts"):
-            with st.spinner("Analyzing RSI and MACD..."):
-                signal_list = []
-                tg_msg = "<b>🚨 Daily Stock Scanner Alerts</b>\n\n"
-                
-                for stock in df_results['Stock'].tolist():
-                    try:
-                        df_hist = yf.download(stock + ".NS", period="3mo", interval="1d", progress=False)
-                        if isinstance(df_hist.columns, pd.MultiIndex): df_hist.columns = df_hist.columns.get_level_values(0)
-                        df_hist = df_hist.dropna()
-                        if len(df_hist) < 30: continue
-                        
-                        rsi = ta.momentum.RSIIndicator(df_hist['Close'], window=14).rsi().iloc[-1]
-                        macd_obj = ta.trend.MACD(df_hist['Close'])
-                        macd_line, macd_signal = macd_obj.macd().iloc[-1], macd_obj.macd_signal().iloc[-1]
-                        price = df_hist['Close'].iloc[-1]
-                        
-                        # EXPANDED LOGIC (Catches Weak & Strong Signals)
-                        if rsi < 40 and macd_line > macd_signal:
-                            signal, reason = "🟢 STRONG BUY", "RSI is oversold & MACD just crossed up."
-                        elif rsi < 40:
-                            signal, reason = "🟡 WEAK BUY", "RSI is oversold. Watch for MACD to cross up."
-                        elif rsi > 60 and macd_line < macd_signal:
-                            signal, reason = "🔴 STRONG SELL", "RSI is overbought & MACD just crossed down."
-                        elif rsi > 60:
-                            signal, reason = "🟠 WEAK SELL", "RSI is overbought. Momentum may be fading."
-                        else:
-                            continue
-                            
-                        signal_list.append({"Stock": stock, "Price": round(price, 2), "RSI": round(rsi, 1), "Action": signal, "Why?": reason})
-                        tg_msg += f"<b>{stock}</b>: {signal} at ₹{round(price, 2)}\n<i>{reason}</i>\n\n"
-                    except: continue
-                
-                if signal_list:
-                    st.session_state.signal_df = pd.DataFrame(signal_list)
-                    if tg_token and tg_chat_id:
-                        success, err_msg = send_telegram_message(tg_token, tg_chat_id, tg_msg)
-                        if success: st.success("✅ Alerts sent to your Telegram!")
-                        else: st.error(f"❌ Telegram Error: {err_msg}")
-                else:
-                    st.session_state.signal_df = pd.DataFrame()
-                    st.info("Market is currently neutral. No strong buy/sell setups found.")
-
-        if 'signal_df' in st.session_state and not st.session_state.signal_df.empty:
-            st.dataframe(st.session_state.signal_df, use_container_width=True, hide_index=True)
-        
-        st.markdown("---")
-        st.subheader("🔍 Deep Dive Chart")
-        signal_stock = st.selectbox("Select a stock to view detailed chart:", df_results['Stock'].tolist())
-        
-        if signal_stock:
-            df_sig = yf.download(signal_stock + ".NS", period="1y", interval="1d", progress=False)
-            if isinstance(df_sig.columns, pd.MultiIndex): df_sig.columns = df_sig.columns.get_level_values(0)
-            df_sig = df_sig.dropna()
-            
-            if not df_sig.empty:
-                df_sig['RSI'] = ta.momentum.RSIIndicator(df_sig['Close'], window=14).rsi()
-                macd = ta.trend.MACD(df_sig['Close'])
-                df_sig['MACD'] = macd.macd()
-                df_sig['MACD_Signal'] = macd.macd_signal()
-                
-                fig_sig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
-                fig_sig.add_trace(go.Candlestick(x=df_sig.index, open=df_sig['Open'], high=df_sig['High'], low=df_sig['Low'], close=df_sig['Close'], name="Price"), row=1, col=1)
-                fig_sig.add_trace(go.Scatter(x=df_sig.index, y=df_sig['RSI'], name="RSI", line=dict(color='purple')), row=2, col=1)
-                fig_sig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
-                fig_sig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
-                fig_sig.add_trace(go.Scatter(x=df_sig.index, y=df_sig['MACD'], name="MACD", line=dict(color='blue')), row=3, col=1)
-                fig_sig.add_trace(go.Scatter(x=df_sig.index, y=df_sig['MACD_Signal'], name="Signal", line=dict(color='orange')), row=3, col=1)
-                fig_sig.update_layout(title=f"{signal_stock} - Detailed Chart", template="plotly_dark", xaxis_rangeslider_visible=False, height=800)
-                st.plotly_chart(fig_sig, use_container_width=True)
