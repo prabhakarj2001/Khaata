@@ -16,31 +16,11 @@ st.title("📈 Ultimate Market & Sector Scanner")
 # ==========================================
 with st.expander("🚨 Current Market Drivers & Risks (Click to expand)", expanded=False):
     current_topics = [
-        {
-            "Topic": "Record FPI Inflows", 
-            "Detail": "FPIs poured massive capital into Indian equities recently, marking one of the highest monthly inflows.", 
-            "Market Impact": "🟢 Bullish - Supports large-caps and provides liquidity."
-        },
-        {
-            "Topic": "Inflation & RBI Rate Hikes", 
-            "Detail": "Retail inflation remains a concern. Any hint of an RBI rate hike pressures valuations and borrowing costs.", 
-            "Market Impact": "🔴 Bearish - Rising rates contract liquidity."
-        },
-        {
-            "Topic": "Crude Oil & Geopolitics", 
-            "Detail": "Oil prices remain volatile due to global tensions. Sustained high prices could trigger FII outflows and hurt the Rupee.", 
-            "Market Impact": "🔴 Bearish - Negative for import bill and currency."
-        },
-        {
-            "Topic": "Global AI Stock Rotation", 
-            "Detail": "A sell-off in global tech/AI stocks often drives funds into emerging markets like India as a safe haven.", 
-            "Market Impact": "🟢 Bullish - Short-term tailwind for Indian IT and large-caps."
-        },
-        {
-            "Topic": "Earnings & Valuations", 
-            "Detail": "Markets are watching if corporate earnings can justify current high valuations amid tightening liquidity.", 
-            "Market Impact": "⚪ Neutral - Awaits confirmation from quarterly results."
-        }
+        {"Topic": "Record FPI Inflows", "Detail": "FPIs poured massive capital into Indian equities recently, marking one of the highest monthly inflows.", "Market Impact": "🟢 Bullish - Supports large-caps and provides liquidity."},
+        {"Topic": "Inflation & RBI Rate Hikes", "Detail": "Retail inflation remains a concern. Any hint of an RBI rate hike pressures valuations.", "Market Impact": "🔴 Bearish - Rising rates contract liquidity."},
+        {"Topic": "Crude Oil & Geopolitics", "Detail": "Oil prices remain volatile. Sustained high prices could trigger FII outflows and hurt the Rupee.", "Market Impact": "🔴 Bearish - Negative for import bill."},
+        {"Topic": "Global AI Stock Rotation", "Detail": "A sell-off in global tech/AI stocks often drives funds into emerging markets like India.", "Market Impact": "🟢 Bullish - Short-term tailwind for Indian IT."},
+        {"Topic": "Earnings & Valuations", "Detail": "Markets are watching if corporate earnings can justify current high valuations.", "Market Impact": "⚪ Neutral - Awaits quarterly results."}
     ]
     st.dataframe(pd.DataFrame(current_topics), use_container_width=True, hide_index=True)
 
@@ -84,9 +64,7 @@ def get_metadata(symbols, nse_map):
     for sym in symbols:
         sector = nse_map.get(sym.replace(".NS", ""), "Other")
         try:
-            # Sanitize ampersand for Yahoo Finance
-            clean_sym = sym.replace("&", "%26")
-            ticker = yf.Ticker(clean_sym if clean_sym.endswith(".NS") else clean_sym + ".NS")
+            ticker = yf.Ticker(sym if sym.endswith(".NS") else sym + ".NS")
             try: mcap = ticker.fast_info['market_cap']
             except: mcap = ticker.info.get('marketCap', 0)
             try: pe = ticker.info.get('trailingPE', None)
@@ -99,26 +77,35 @@ def get_ret(df, days):
     if len(df) > days: return ((df['Close'].iloc[-1] - df['Close'].iloc[-days]) / df['Close'].iloc[-days]) * 100
     return 0.0
 
+# THE FIX: Smart Fallback Downloader
 @st.cache_data(ttl=3600)
 def download_data(symbols, period="5y"):
     all_data = {}
-    # Chunk size of 15 prevents rate limits and 'M&M' crashes
-    for i in range(0, len(symbols), 15): 
+    for i in range(0, len(symbols), 15): # Chunk size 15
         chunk = symbols[i:i+15]
-        tickers = [s.replace("&", "%26") if s.endswith(".NS") else s.replace("&", "%26") + ".NS" for s in chunk]
+        tickers = [s + ".NS" if not s.endswith(".NS") else s for s in chunk]
         
+        # 1. Try Bulk Download
         try:
-            data = yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False)
+            data = yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False, threads=True)
             if not data.empty:
                 for orig_sym, clean_sym in zip(chunk, tickers):
                     if isinstance(data.columns, pd.MultiIndex) and clean_sym in data.columns.levels[0]:
                         df = data[clean_sym].dropna()
                         if not df.empty: all_data[orig_sym] = df
-                    elif not isinstance(data.columns, pd.MultiIndex) and len(chunk) == 1:
-                        df = data.dropna()
-                        if not df.empty: all_data[orig_sym] = df
         except: pass
-        time.sleep(1.2) # Pause to prevent blocks
+        
+        # 2. Fallback: If any stock in the chunk failed (like M&M), download it individually
+        for s in chunk:
+            if s not in all_data:
+                try:
+                    d = yf.download(s + ".NS" if not s.endswith(".NS") else s, period=period, interval="1d", progress=False)
+                    if not d.empty:
+                        if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.get_level_values(0)
+                        all_data[s] = d.dropna()
+                except: pass
+                
+        time.sleep(1) # Prevent rate limit
     return all_data
 
 # ==========================================
