@@ -12,15 +12,15 @@ st.set_page_config(page_title="Market Master Scanner", layout="wide")
 st.title("📈 Ultimate Market & Sector Scanner")
 
 # ==========================================
-# --- CURRENT MARKET DRIVERS (LIVE INTELLIGENCE) ---
+# --- CURRENT MARKET DRIVERS ---
 # ==========================================
 with st.expander("🚨 Current Market Drivers & Risks (Click to expand)", expanded=False):
     current_topics = [
-        {"Topic": "Record FPI Inflows", "Detail": "FPIs poured massive capital into Indian equities recently, marking one of the highest monthly inflows.", "Market Impact": "🟢 Bullish - Supports large-caps and provides liquidity."},
-        {"Topic": "Inflation & RBI Rate Hikes", "Detail": "Retail inflation remains a concern. Any hint of an RBI rate hike pressures valuations.", "Market Impact": "🔴 Bearish - Rising rates contract liquidity."},
-        {"Topic": "Crude Oil & Geopolitics", "Detail": "Oil prices remain volatile. Sustained high prices could trigger FII outflows and hurt the Rupee.", "Market Impact": "🔴 Bearish - Negative for import bill."},
-        {"Topic": "Global AI Stock Rotation", "Detail": "A sell-off in global tech/AI stocks often drives funds into emerging markets like India.", "Market Impact": "🟢 Bullish - Short-term tailwind for Indian IT."},
-        {"Topic": "Earnings & Valuations", "Detail": "Markets are watching if corporate earnings can justify current high valuations.", "Market Impact": "⚪ Neutral - Awaits quarterly results."}
+        {"Topic": "Record FPI Inflows", "Detail": "FPIs poured massive capital into Indian equities recently.", "Market Impact": "🟢 Bullish"},
+        {"Topic": "Inflation & RBI Rate Hikes", "Detail": "Retail inflation remains a concern. Rate hikes pressure valuations.", "Market Impact": "🔴 Bearish"},
+        {"Topic": "Crude Oil & Geopolitics", "Detail": "Oil price spikes hurt India's import bill and the Rupee.", "Market Impact": "🔴 Bearish"},
+        {"Topic": "Global AI Stock Rotation", "Detail": "Sell-off in global tech drives funds into Indian IT.", "Market Impact": "🟢 Bullish"},
+        {"Topic": "Earnings & Valuations", "Detail": "Markets watching if earnings justify high valuations.", "Market Impact": "⚪ Neutral"}
     ]
     st.dataframe(pd.DataFrame(current_topics), use_container_width=True, hide_index=True)
 
@@ -64,7 +64,9 @@ def get_metadata(symbols, nse_map):
     for sym in symbols:
         sector = nse_map.get(sym.replace(".NS", ""), "Other")
         try:
-            ticker = yf.Ticker(sym if sym.endswith(".NS") else sym + ".NS")
+            # Sanitize ampersand for Yahoo API
+            clean_sym = sym.replace("&", "%26")
+            ticker = yf.Ticker(clean_sym if clean_sym.endswith(".NS") else clean_sym + ".NS")
             try: mcap = ticker.fast_info['market_cap']
             except: mcap = ticker.info.get('marketCap', 0)
             try: pe = ticker.info.get('trailingPE', None)
@@ -74,38 +76,51 @@ def get_metadata(symbols, nse_map):
     return meta
 
 def get_ret(df, days):
-    if len(df) > days: return ((df['Close'].iloc[-1] - df['Close'].iloc[-days]) / df['Close'].iloc[-days]) * 100
+    if len(df) > 1:
+        actual_days = min(days, len(df) - 1)
+        if actual_days > 0:
+            return ((df['Close'].iloc[-1] - df['Close'].iloc[-actual_days]) / df['Close'].iloc[-actual_days]) * 100
     return 0.0
 
-# THE FIX: Smart Fallback Downloader
 @st.cache_data(ttl=3600)
 def download_data(symbols, period="5y"):
     all_data = {}
-    for i in range(0, len(symbols), 15): # Chunk size 15
-        chunk = symbols[i:i+15]
-        tickers = [s + ".NS" if not s.endswith(".NS") else s for s in chunk]
+    
+    # 1. Sanitize tickers (M&M -> M%26M)
+    clean_symbols = [s.replace("&", "%26") + ".NS" if not s.endswith(".NS") else s.replace("&", "%26") for s in symbols]
+    symbol_map = {clean: orig for clean, orig in zip(clean_symbols, symbols)}
+    
+    # 2. Chunk and Download
+    for i in range(0, len(clean_symbols), 15): 
+        chunk = clean_symbols[i:i+15]
         
-        # 1. Try Bulk Download
+        # Try bulk download with threads=False (prevents silent crashes)
         try:
-            data = yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False, threads=True)
+            data = yf.download(chunk, period=period, interval="1d", group_by='ticker', progress=False, threads=False)
             if not data.empty:
-                for orig_sym, clean_sym in zip(chunk, tickers):
+                for clean_sym in chunk:
+                    orig_sym = symbol_map[clean_sym]
                     if isinstance(data.columns, pd.MultiIndex) and clean_sym in data.columns.levels[0]:
                         df = data[clean_sym].dropna()
                         if not df.empty: all_data[orig_sym] = df
+                    elif not isinstance(data.columns, pd.MultiIndex) and len(chunk) == 1:
+                        df = data.dropna()
+                        if not df.empty: all_data[orig_sym] = df
         except: pass
         
-        # 2. Fallback: If any stock in the chunk failed (like M&M), download it individually
-        for s in chunk:
-            if s not in all_data:
-                try:
-                    d = yf.download(s + ".NS" if not s.endswith(".NS") else s, period=period, interval="1d", progress=False)
-                    if not d.empty:
-                        if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.get_level_values(0)
-                        all_data[s] = d.dropna()
-                except: pass
-                
-        time.sleep(1) # Prevent rate limit
+        # 3. Fallback: If any stock in the chunk failed, download it individually
+        missing = [s for s in chunk if symbol_map[s] not in all_data]
+        for clean_sym in missing:
+            orig_sym = symbol_map[clean_sym]
+            try:
+                d = yf.download(clean_sym, period=period, interval="1d", progress=False)
+                if not d.empty:
+                    if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.get_level_values(0)
+                    all_data[orig_sym] = d.dropna()
+            except: pass
+            time.sleep(0.5)
+            
+        time.sleep(1) 
     return all_data
 
 # ==========================================
@@ -115,7 +130,7 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
     all_syms, nse_map = get_nse_data()
     target_syms = all_syms[:50] if scan_size == "Nifty 50 (Fast)" else (all_syms[:100] if scan_size == "Nifty 100" else all_syms)
 
-    with st.spinner(f"Downloading 5-Year Data for {len(target_syms)} stocks..."):
+    with st.spinner(f"Downloading Data for {len(target_syms)} stocks..."):
         p_data = download_data(target_syms, period="5y")
         m_map = get_metadata(target_syms, nse_map)
         
@@ -150,6 +165,7 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
             })
         st.session_state.df = pd.DataFrame(results)
         st.session_state.p_data = p_data 
+        st.success(f"✅ Successfully downloaded {len(results)} stocks!")
 
 # ==========================================
 # --- RENDER TABS ---
