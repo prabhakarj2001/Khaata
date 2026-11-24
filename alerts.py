@@ -1,3 +1,4 @@
+
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -16,7 +17,9 @@ def send_telegram(text: str) -> None:
     if not TOKEN or not CHAT_ID:
         print("Telegram skipped: TG_TOKEN / TG_CHAT_ID missing.")
         return
+
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
     chunks = []
     while len(text) > 3900:
         cut = text.rfind("\n", 0, 3900)
@@ -24,17 +27,53 @@ def send_telegram(text: str) -> None:
             cut = 3900
         chunks.append(text[:cut])
         text = text[cut:].lstrip()
+
     chunks.append(text)
+
     for chunk in chunks:
         response = requests.post(
-            url, data={"chat_id": CHAT_ID, "text": chunk}, timeout=25
+            url,
+            data={"chat_id": CHAT_ID, "text": chunk},
+            timeout=25
         )
         response.raise_for_status()
 
 
 def every_third_calendar_day() -> bool:
-    # Alert on days 1, 4, 7, 10 ...; scheduled workflow itself runs weekdays.
     return (datetime.now(IST).day - 1) % 3 == 0
+
+
+def fmt(value, decimals=2, suffix=""):
+    try:
+        if pd.isna(value):
+            return "n/a"
+        return f"{float(value):.{decimals}f}{suffix}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def stock_details(r, category):
+    ticker = r.get("ticker", "Unknown")
+    price = fmt(r.get("price"))
+    rsi = fmt(r.get("rsi"), 1)
+    cmf = fmt(r.get("cmf"), 2)
+    ret3 = fmt(r.get("return_3d"), 2, "%")
+    ret5 = fmt(r.get("return_5d"), 2, "%")
+
+    line = (
+        f"{ticker} | ₹{price}\n"
+        f"   RSI: {rsi} | CMF: {cmf} | 3D: {ret3} | 5D: {ret5}"
+    )
+
+    if category in ["STRONG BUY", "WEAK BUY",
+                    "STRONG SELL", "WEAK SELL"]:
+        line += (
+            f"\n   SL: ₹{fmt(r.get('stop_loss'))}"
+            f" | 2R: ₹{fmt(r.get('target_2r'))}"
+            f" | 3R: ₹{fmt(r.get('target_3r'))}"
+        )
+
+    return line
 
 
 def main():
@@ -57,52 +96,122 @@ def main():
     gate_passed, gate_reason = telegram_quality_gate(summary)
 
     lines = [
-        "KHAATA MARKET SCANNER",
+        "================================",
+        "       KHAATA MARKET SCANNER",
+        "================================",
         f"Date: {now.strftime('%d-%m-%Y %H:%M IST')}",
-        f"Telegram quality gate: {gate_reason}",
+        f"Quality Gate: {gate_reason}",
         "",
-        "BACKTEST SUMMARY (RSI<40 historical entries)"
+        "========== BACKTEST =========="
     ]
 
     if not summary.empty:
         for _, r in summary.iterrows():
-            def fmt(value, suffix=""):
-                return "n/a" if pd.isna(value) else f"{value:.2f}{suffix}"
             lines.append(
-                f"{r['horizon']}: n={int(r['observations'])}, "
-                f"hit={fmt(r['hit_rate_pct'], '%')}, "
-                f"avg={fmt(r['avg_return_pct'], '%')}, "
-                f"payoff={fmt(r['payoff_ratio'])}, "
-                f"benchmark edge={fmt(r['benchmark_edge_pp'], 'pp')}"
+                f"{r['horizon']} | "
+                f"Hit: {fmt(r['hit_rate_pct'], 2, '%')} | "
+                f"Avg: {fmt(r['avg_return_pct'], 2, '%')} | "
+                f"Payoff: {fmt(r['payoff_ratio'])} | "
+                f"Edge: {fmt(r['benchmark_edge_pp'], 2, 'pp')}"
             )
+    else:
+        lines.append("Backtest data unavailable.")
+
+    lines.extend([
+        "",
+        "========== TRADING SIGNALS =========="
+    ])
+
+    categories = [
+        ("STRONG BUY", "🟢 STRONG BUY"),
+        ("WEAK BUY", "🟩 WEAK BUY"),
+        ("STRONG SELL", "🔴 STRONG SELL"),
+        ("WEAK SELL", "🟥 WEAK SELL"),
+        ("HOLD", "⚪ HOLD")
+    ]
 
     if gate_passed:
-        lines.extend(["", "CURRENT SIGNALS"])
         if signals.empty:
-            lines.append("No qualifying signals today.")
+            lines.append("No stocks available.")
         else:
-            for category in ["STRONG BUY", "WEAK BUY", "STRONG SELL", "WEAK SELL", "HOLD"]:
+            for category, heading in categories:
                 group = signals[signals["signal"] == category]
+
+                lines.extend([
+                    "",
+                    f"--- {heading} ({len(group)}) ---"
+                ])
+
                 if group.empty:
+                    lines.append("No stocks in this category.")
                     continue
-                lines.extend(["", f"{category} ({len(group)})"])
+
                 for _, r in group.iterrows():
-                    lines.append(
-                        f"{r['ticker']} | ₹{r['price']:.2f} | RSI {r['rsi']:.1f} | "
-                        f"CMF {r['cmf']:.2f} | 5D {r['return_5d']:.2f}% | "
-                        f"SL ₹{r['stop_loss']:.2f} | "
-                        f"2R ₹{r['target_2r']:.2f} | 3R ₹{r['target_3r']:.2f}"
-                    )
+                    lines.append(stock_details(r, category))
+                    lines.append("")
+
     else:
         lines.extend([
             "",
-            "LIVE BUY/SELL SIGNALS WITHHELD",
-            "The backtest quality gate was not met. Review the CSV reports first."
+            "BUY/SELL SIGNALS WITHHELD",
+            f"Reason: {gate_reason}",
+            "Review backtest results before acting."
         ])
 
+        # Still display HOLD stocks when the quality gate fails.
+        if not signals.empty:
+            group = signals[signals["signal"] == "HOLD"]
+            lines.extend(["", f"--- ⚪ HOLD ({len(group)}) ---"])
+
+            for _, r in group.iterrows():
+                lines.append(stock_details(r, "HOLD"))
+                lines.append("")
+
+    # TOP 10 PERFORMERS OVER 3 TRADING SESSIONS
+    lines.extend([
+        "",
+        "================================",
+        " TOP 10 PERFORMERS - LAST 3 DAYS",
+        "================================"
+    ])
+
+    if not signals.empty and "return_3d" in signals.columns:
+        performers = signals.copy()
+        performers["return_3d"] = pd.to_numeric(
+            performers["return_3d"], errors="coerce"
+        )
+        performers = performers.dropna(subset=["return_3d"])
+        performers = performers.sort_values(
+            "return_3d", ascending=False
+        ).head(10)
+
+        if performers.empty:
+            lines.append("3-day performance data unavailable.")
+        else:
+            for rank, (_, r) in enumerate(performers.iterrows(), start=1):
+                lines.append(
+                    f"{rank}. {r['ticker']} | "
+                    f"₹{fmt(r.get('price'))} | "
+                    f"3D Return: {fmt(r.get('return_3d'), 2, '%')}"
+                )
+    else:
+        lines.append(
+            "3-day return field missing. Check scanner_core.py."
+        )
+
     if failures:
-        lines.extend(["", f"DATA FAILURES ({len(failures)})"])
+        lines.extend([
+            "",
+            f"========== DATA FAILURES ({len(failures)}) =========="
+        ])
         lines.extend(failures[:30])
+
+    lines.extend([
+        "",
+        "================================",
+        "       END OF SCAN REPORT",
+        "================================"
+    ])
 
     send_telegram("\n".join(lines))
     print("Scheduled scan completed.")
