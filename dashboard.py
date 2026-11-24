@@ -29,8 +29,10 @@ with st.expander("🚨 Current Market Drivers & Risks (Click to expand)", expand
 # ==========================================
 def send_telegram_message(token, chat_id, message):
     try:
+        # Telegram has a 4096 character limit. We slice it to prevent crashes.
+        safe_message = message[:4000] + "\n...(Truncated)" if len(message) > 4000 else message
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+        payload = {"chat_id": chat_id, "text": safe_message, "parse_mode": "HTML"}
         response = requests.post(url, json=payload)
         return response.status_code == 200, response.json().get('description', 'Error')
     except Exception as e: return False, str(e)
@@ -38,9 +40,6 @@ def send_telegram_message(token, chat_id, message):
 # ==========================================
 # --- SIDEBAR CONTROLS ---
 # ==========================================
-st.sidebar.header("Scanner Settings")
-scan_size = st.sidebar.selectbox("Stocks to scan?", ["Nifty 50 (Fast)", "Nifty 100", "Nifty 500 (Slow)"], index=1)
-
 st.sidebar.header("📱 Telegram Alerts")
 tg_token = st.sidebar.text_input("Bot Token", type="password", value="9015179938:AAFATXEjxrMZUwPp4csuQO6vmFdae3dBXWE")
 tg_chat_id = st.sidebar.text_input("Chat ID", value="1063631401")
@@ -64,17 +63,13 @@ def get_ret(df, days):
             return ((df['Close'].iloc[-1] - df['Close'].iloc[-actual_days]) / df['Close'].iloc[-actual_days]) * 100
     return 0.0
 
-# OPTIMIZED: Fast download with no '&' tickers and bigger chunks
 @st.cache_data(ttl=3600)
 def download_data(symbols, period="5y"):
     all_data = {}
-    # Chunk size 50 for speed
     for i in range(0, len(symbols), 50): 
         chunk = symbols[i:i+50]
         tickers = [s + ".NS" if not s.endswith(".NS") else s for s in chunk]
-        
         try:
-            # threads=True is safe now that we removed '&' stocks
             data = yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False, threads=True)
             if not data.empty:
                 for orig_sym, clean_sym in zip(chunk, tickers):
@@ -90,19 +85,15 @@ def download_data(symbols, period="5y"):
 # ==========================================
 # --- MAIN LOGIC ---
 # ==========================================
-if st.button("🚀 Fetch Data & Build Dashboard"):
+if st.button("🚀 Fetch Nifty 500 Data & Build Dashboard"):
     all_syms, nse_map = get_nse_data()
+    all_syms = [s for s in all_syms if "&" not in s] # Skip M&M
     
-    # THE FIX: Skip M&M and any stock with an ampersand entirely
-    all_syms = [s for s in all_syms if "&" not in s]
-    
-    target_syms = all_syms[:50] if scan_size == "Nifty 50 (Fast)" else (all_syms[:100] if scan_size == "Nifty 100" else all_syms)
-
-    with st.spinner(f"Downloading Data for {len(target_syms)} stocks (Fast Mode)..."):
-        p_data = download_data(target_syms, period="5y")
+    with st.spinner(f"Downloading Data for all {len(all_syms)} Nifty 500 stocks... (Takes ~15 seconds)"):
+        p_data = download_data(all_syms, period="5y")
         
         results = []
-        for sym in target_syms:
+        for sym in all_syms:
             df = p_data.get(sym)
             if df is None or len(df) < 50: continue
 
@@ -119,8 +110,7 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
             vol_spike = "🚨 SPIKE" if df['Volume'].iloc[-1] > (2 * df['Volume'].rolling(20).mean().iloc[-1]) else "Normal"
 
             results.append({
-                "Stock": sym.replace(".NS", ""), 
-                "Sector": nse_map.get(sym.replace(".NS", ""), "Other"),
+                "Stock": sym.replace(".NS", ""), "Sector": nse_map.get(sym.replace(".NS", ""), "Other"),
                 "Price": round(float(price), 2),
                 "1M %": round(float(r_1m), 1), "3M %": round(float(r_3m), 1), "6M %": round(float(r_6m), 1),
                 "1Y %": round(float(r_1y), 1), "3Y %": round(float(r_3y), 1), "5Y %": round(float(r_5y), 1),
@@ -129,7 +119,7 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
             
         st.session_state.df = pd.DataFrame(results)
         st.session_state.p_data = p_data 
-        st.success(f"✅ Successfully downloaded {len(results)} stocks in record time!")
+        st.success(f"✅ Successfully downloaded {len(results)} stocks!")
 
 # ==========================================
 # --- RENDER TABS ---
@@ -197,18 +187,29 @@ if 'df' in st.session_state and not st.session_state.df.empty:
 
     # --- TAB 6: BUY/SELL ---
     with tab6:
-        st.subheader("📈 Actionable Signals")
+        st.subheader("📈 Actionable Signals & Hold Times")
         
-        if st.button("📤 Send 3-Day Top 10 Report"):
-            top10 = df.sort_values(by="Momentum", ascending=False).head(10)
-            msg = "<b>🚨 3-Day Market Report</b>\n\n<b>🏆 Top 10 Momentum Stocks</b>\n"
-            for _, r in top10.iterrows(): msg += f"• {r['Stock']} (Score: {r['Momentum']}) - ₹{r['Price']}\n"
-            msg += "\n<b>🥇 Metals</b>\n" + "\n".join([f"• {i['Metal']}: {i['Fund Flow']} (RSI: {i['RSI']})" for i in flow_data])
-            success, err = send_telegram_message(tg_token, tg_chat_id, msg)
-            if success: st.success("✅ Report sent!")
-            else: st.error(f"❌ Error: {err}")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📤 Send 3-Day Top 10 Report"):
+                top10 = df.sort_values(by="Momentum", ascending=False).head(10)
+                msg = "<b>🚨 3-Day Market Report</b>\n\n<b>🏆 Top 10 Momentum Stocks</b>\n"
+                for _, r in top10.iterrows(): msg += f"• {r['Stock']} (Score: {r['Momentum']}) - ₹{r['Price']}\n"
+                success, err = send_telegram_message(tg_token, tg_chat_id, msg)
+                if success: st.success("✅ 3-Day Report sent!")
+                else: st.error(f"❌ Error: {err}")
+        
+        with col2:
+            if st.button("📅 Send Weekly Update"):
+                top10 = df.sort_values(by="1M %", ascending=False).head(10)
+                msg = "<b>📅 Weekly Top Performers (1M Return)</b>\n\n"
+                for _, r in top10.iterrows(): msg += f"• {r['Stock']}: {r['1M %']}% (₹{r['Price']})\n"
+                success, err = send_telegram_message(tg_token, tg_chat_id, msg)
+                if success: st.success("✅ Weekly Report sent!")
+                else: st.error(f"❌ Error: {err}")
 
         st.markdown("---")
+        
         if st.button("🔄 Generate Buy/Sell Alerts"):
             with st.spinner("Analyzing all stocks..."):
                 sig_list, tg_msg = [], "<b>🚨 Buy/Sell Alerts</b>\n\n"
@@ -222,19 +223,40 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                     macd = ta.trend.MACD(df_h['Close'])
                     ml, ms = macd.macd().iloc[-1], macd.macd_signal().iloc[-1]
                     
-                    if rsi < 40 and ml > ms: sig, why = "🟢 STRONG BUY", "RSI low & MACD up."
-                    elif rsi < 40: sig, why = "🟡 WEAK BUY", "RSI low."
-                    elif rsi > 60 and ml < ms: sig, why = "🔴 STRONG SELL", "RSI high & MACD down."
-                    elif rsi > 60: sig, why = "🟠 WEAK SELL", "RSI high."
+                    # Get momentum from main df for Hold Time calculation
+                    stock_row = df[df['Stock'] == stock].iloc[0]
+                    mom_score = stock_row['Momentum']
+                    
+                    if rsi < 40 and ml > ms: 
+                        sig, why = "🟢 STRONG BUY", "RSI low & MACD up."
+                        hold = "1-2 Months" if mom_score > 15 else "2-3 Weeks"
+                    elif rsi < 40: 
+                        sig, why = "🟡 WEAK BUY", "RSI low."
+                        hold = "Wait for MACD"
+                    elif rsi > 60 and ml < ms: 
+                        sig, why = "🔴 STRONG SELL", "RSI high & MACD down."
+                        hold = "Exit Now"
+                    elif rsi > 60: 
+                        sig, why = "🟠 WEAK SELL", "RSI high."
+                        hold = "Book Partial Profit"
                     else: continue
                     
-                    sig_list.append({"Stock": stock, "Price": round(df_h['Close'].iloc[-1], 2), "RSI": round(rsi, 1), "Action": sig, "Why?": why})
-                    tg_msg += f"<b>{stock}</b>: {sig}\n"
+                    sig_list.append({
+                        "Stock": stock, 
+                        "Price": round(df_h['Close'].iloc[-1], 2), 
+                        "RSI": round(rsi, 1), 
+                        "Action": sig, 
+                        "Hold Time": hold,
+                        "Why?": why
+                    })
+                    tg_msg += f"<b>{stock}</b>: {sig} (Hold: {hold})\n"
                     
                 if sig_list:
                     st.session_state.sig_df = pd.DataFrame(sig_list)
-                    send_telegram_message(tg_token, tg_chat_id, tg_msg)
-                else: st.info("Neutral market.")
+                    success, err = send_telegram_message(tg_token, tg_chat_id, tg_msg)
+                    if success: st.success("✅ Buy/Sell Alerts sent to Telegram!")
+                    else: st.error(f"❌ Telegram Error: {err}")
+                else: st.info("Neutral market. No signals generated.")
         
         if 'sig_df' in st.session_state:
             st.dataframe(st.session_state.sig_df, use_container_width=True, hide_index=True)
