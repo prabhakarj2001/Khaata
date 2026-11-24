@@ -40,14 +40,13 @@ def send_telegram_message(token, chat_id, message):
 # ==========================================
 st.sidebar.header("Scanner Settings")
 scan_size = st.sidebar.selectbox("Stocks to scan?", ["Nifty 50 (Fast)", "Nifty 100", "Nifty 500 (Slow)"], index=1)
-mcap_filter = st.sidebar.selectbox("Market Cap Filter", ["All Stocks", "Large Cap (>50k Cr)", "Mid Cap (18k-50k Cr)", "Small Cap (<18k Cr)"], index=0)
 
 st.sidebar.header("📱 Telegram Alerts")
 tg_token = st.sidebar.text_input("Bot Token", type="password", value="9015179938:AAFATXEjxrMZUwPp4csuQO6vmFdae3dBXWE")
 tg_chat_id = st.sidebar.text_input("Chat ID", value="1063631401")
 
 # ==========================================
-# --- DATA FETCHING & CALCULATIONS ---
+# --- DATA FETCHING ---
 # ==========================================
 @st.cache_data(ttl=86400)
 def get_nse_data():
@@ -58,23 +57,6 @@ def get_nse_data():
     except: 
         return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"], {s: "Unknown" for s in ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"]}
 
-@st.cache_data(ttl=86400)
-def get_metadata(symbols, nse_map):
-    meta = {}
-    for sym in symbols:
-        sector = nse_map.get(sym.replace(".NS", ""), "Other")
-        try:
-            # Sanitize ampersand for Yahoo API
-            clean_sym = sym.replace("&", "%26")
-            ticker = yf.Ticker(clean_sym if clean_sym.endswith(".NS") else clean_sym + ".NS")
-            try: mcap = ticker.fast_info['market_cap']
-            except: mcap = ticker.info.get('marketCap', 0)
-            try: pe = ticker.info.get('trailingPE', None)
-            except: pe = None
-            meta[sym] = {"Sector": sector, "MCap": mcap / 10000000 if mcap else 0, "PE": round(pe, 1) if pe else None}
-        except: meta[sym] = {"Sector": sector, "MCap": 0, "PE": None}
-    return meta
-
 def get_ret(df, days):
     if len(df) > 1:
         actual_days = min(days, len(df) - 1)
@@ -82,24 +64,20 @@ def get_ret(df, days):
             return ((df['Close'].iloc[-1] - df['Close'].iloc[-actual_days]) / df['Close'].iloc[-actual_days]) * 100
     return 0.0
 
+# OPTIMIZED: Fast download with no '&' tickers and bigger chunks
 @st.cache_data(ttl=3600)
 def download_data(symbols, period="5y"):
     all_data = {}
-    
-    # 1. Sanitize tickers (M&M -> M%26M)
-    clean_symbols = [s.replace("&", "%26") + ".NS" if not s.endswith(".NS") else s.replace("&", "%26") for s in symbols]
-    symbol_map = {clean: orig for clean, orig in zip(clean_symbols, symbols)}
-    
-    # 2. Chunk and Download
-    for i in range(0, len(clean_symbols), 15): 
-        chunk = clean_symbols[i:i+15]
+    # Chunk size 50 for speed
+    for i in range(0, len(symbols), 50): 
+        chunk = symbols[i:i+50]
+        tickers = [s + ".NS" if not s.endswith(".NS") else s for s in chunk]
         
-        # Try bulk download with threads=False (prevents silent crashes)
         try:
-            data = yf.download(chunk, period=period, interval="1d", group_by='ticker', progress=False, threads=False)
+            # threads=True is safe now that we removed '&' stocks
+            data = yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False, threads=True)
             if not data.empty:
-                for clean_sym in chunk:
-                    orig_sym = symbol_map[clean_sym]
+                for orig_sym, clean_sym in zip(chunk, tickers):
                     if isinstance(data.columns, pd.MultiIndex) and clean_sym in data.columns.levels[0]:
                         df = data[clean_sym].dropna()
                         if not df.empty: all_data[orig_sym] = df
@@ -107,20 +85,6 @@ def download_data(symbols, period="5y"):
                         df = data.dropna()
                         if not df.empty: all_data[orig_sym] = df
         except: pass
-        
-        # 3. Fallback: If any stock in the chunk failed, download it individually
-        missing = [s for s in chunk if symbol_map[s] not in all_data]
-        for clean_sym in missing:
-            orig_sym = symbol_map[clean_sym]
-            try:
-                d = yf.download(clean_sym, period=period, interval="1d", progress=False)
-                if not d.empty:
-                    if isinstance(d.columns, pd.MultiIndex): d.columns = d.columns.get_level_values(0)
-                    all_data[orig_sym] = d.dropna()
-            except: pass
-            time.sleep(0.5)
-            
-        time.sleep(1) 
     return all_data
 
 # ==========================================
@@ -128,21 +92,19 @@ def download_data(symbols, period="5y"):
 # ==========================================
 if st.button("🚀 Fetch Data & Build Dashboard"):
     all_syms, nse_map = get_nse_data()
+    
+    # THE FIX: Skip M&M and any stock with an ampersand entirely
+    all_syms = [s for s in all_syms if "&" not in s]
+    
     target_syms = all_syms[:50] if scan_size == "Nifty 50 (Fast)" else (all_syms[:100] if scan_size == "Nifty 100" else all_syms)
 
-    with st.spinner(f"Downloading Data for {len(target_syms)} stocks..."):
+    with st.spinner(f"Downloading Data for {len(target_syms)} stocks (Fast Mode)..."):
         p_data = download_data(target_syms, period="5y")
-        m_map = get_metadata(target_syms, nse_map)
         
         results = []
         for sym in target_syms:
             df = p_data.get(sym)
             if df is None or len(df) < 50: continue
-            
-            mcap = m_map.get(sym, {}).get("MCap", 0)
-            if mcap_filter == "Large Cap (>50k Cr)" and mcap < 50000: continue
-            if mcap_filter == "Mid Cap (18k-50k Cr)" and (mcap < 18000 or mcap > 50000): continue
-            if mcap_filter == "Small Cap (<18k Cr)" and mcap > 18000: continue
 
             price = df['Close'].iloc[-1]
             r_1m = get_ret(df, 21)
@@ -157,15 +119,17 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
             vol_spike = "🚨 SPIKE" if df['Volume'].iloc[-1] > (2 * df['Volume'].rolling(20).mean().iloc[-1]) else "Normal"
 
             results.append({
-                "Stock": sym.replace(".NS", ""), "Sector": m_map.get(sym, {}).get("Sector", "Other"),
-                "MCap (Cr)": round(mcap, 0), "P/E": m_map.get(sym, {}).get("PE"), "Price": round(float(price), 2),
+                "Stock": sym.replace(".NS", ""), 
+                "Sector": nse_map.get(sym.replace(".NS", ""), "Other"),
+                "Price": round(float(price), 2),
                 "1M %": round(float(r_1m), 1), "3M %": round(float(r_3m), 1), "6M %": round(float(r_6m), 1),
                 "1Y %": round(float(r_1y), 1), "3Y %": round(float(r_3y), 1), "5Y %": round(float(r_5y), 1),
                 "Momentum": round(float(mom), 1), "Trend": trend, "Vol": vol_spike
             })
+            
         st.session_state.df = pd.DataFrame(results)
         st.session_state.p_data = p_data 
-        st.success(f"✅ Successfully downloaded {len(results)} stocks!")
+        st.success(f"✅ Successfully downloaded {len(results)} stocks in record time!")
 
 # ==========================================
 # --- RENDER TABS ---
@@ -186,17 +150,6 @@ if 'df' in st.session_state and not st.session_state.df.empty:
             fig_s = go.Figure(data=[go.Candlestick(x=s_df.dropna().index, open=s_df['Open'], high=s_df['High'], low=s_df['Low'], close=s_df['Close'])])
             fig_s.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=400, title="Sensex 1-Year Chart")
             st.plotly_chart(fig_s, use_container_width=True)
-
-        st.markdown("""
-        <div style="background-color:#2a1a1a; padding:15px; border-radius:10px; border-left:5px solid #FF4B4B; margin-top: 20px;">
-            <h4 style="color:#FF4B4B;">⚠️ Macro-Economic 'Look Out'</h4>
-            <ul style="color:#E0E0E0;">
-                <li><b>RBI Rates:</b> Hikes contract markets, cuts expand them.</li>
-                <li><b>FII Selling:</b> Heavy outflows drag Nifty down.</li>
-                <li><b>Oil Prices:</b> Spikes hurt India's import bill.</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
 
     # --- TAB 2: TOP 10 ---
     with tab2:
