@@ -56,9 +56,10 @@ st.sidebar.header("Scanner Settings")
 scan_size = st.sidebar.selectbox("How many stocks to scan?", ["Nifty 50 (Fast)", "Nifty 100", "Nifty 500 (Slow)"], index=1)
 market_cap_filter = st.sidebar.selectbox("Filter by Market Cap", ["All Stocks", "Large Cap (>50k Cr)", "Mid Cap (18k-50k Cr)", "Small Cap (<18k Cr)"], index=0)
 
-st.sidebar.header("📱 Telegram Alerts Setup")
-tg_token = st.sidebar.text_input("Telegram Bot Token", type="password")
-tg_chat_id = st.sidebar.text_input("Telegram Chat ID")
+st.sidebar.header("📱 Telegram Alerts (Saved)")
+# PERMANENTLY SAVED CREDENTIALS
+tg_token = st.sidebar.text_input("Telegram Bot Token", type="password", value="9015179938:AAFATXEjxrMZUwPp4csuQO6vmFdae3dBXWE")
+tg_chat_id = st.sidebar.text_input("Telegram Chat ID", value="1063631401")
 
 # ==========================================
 # --- DATA FETCHING FUNCTIONS ---
@@ -140,6 +141,7 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
                 if market_cap_filter == "Mid Cap (18k-50k Cr)" and (mcap_cr < 18000 or mcap_cr > 50000): continue
                 if market_cap_filter == "Small Cap (<18k Cr)" and mcap_cr > 18000: continue
 
+                # TIMEFRAMES
                 ret_1m = ((current_price - df['Close'].iloc[-21]) / df['Close'].iloc[-21]) * 100 if len(df) > 21 else 0
                 ret_6m = ((current_price - df['Close'].iloc[-126]) / df['Close'].iloc[-126]) * 100 if len(df) > 126 else 0
                 ret_1y = ((current_price - df['Close'].iloc[-252]) / df['Close'].iloc[-252]) * 100 if len(df) > 252 else 0
@@ -183,6 +185,7 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         "🏦 Institutional Flow", "🥇 Metals", "📈 Actionable Buy/Sell"
     ])
 
+    # --- TAB 1: SENSEX & MACRO ---
     with tab1:
         st.subheader("📉 S&P BSE SENSEX Performance")
         sensex_df = yf.download("^BSESN", period="5y", interval="1d", progress=False)
@@ -192,7 +195,22 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
             fig_sensex = go.Figure(data=[go.Candlestick(x=sensex_df.index, open=sensex_df['Open'], high=sensex_df['High'], low=sensex_df['Low'], close=sensex_df['Close'])])
             fig_sensex.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=400)
             st.plotly_chart(fig_sensex, use_container_width=True)
+            
+        st.markdown("---")
+        st.subheader("⚠️ Macro-Economic 'Look Out' (Booms & Busts)")
+        st.markdown("""
+        <div style="background-color:#2a1a1a; padding:15px; border-radius:10px; border-left:5px solid #FF4B4B;">
+            <h4 style="color:#FF4B4B; margin-top:0;">What to watch out for before buying:</h4>
+            <ul style="color:#E0E0E0;">
+                <li><b>Interest Rates (RBI):</b> If RBI increases rates, borrowing becomes expensive. Markets usually fall. If rates are cut, markets boom.</li>
+                <li><b>FII Flows (Foreign Money):</b> If foreigners are selling heavily for weeks, the market will drop. Wait for them to turn green before buying.</li>
+                <li><b>Global Geopolitics:</b> Wars or US-China tensions cause oil prices to spike. High oil = bad for India.</li>
+                <li><b>Election Cycles:</b> 3-6 months before major elections, markets are highly volatile.</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
 
+    # --- TAB 2: STOCK SCANNER ---
     with tab2:
         st.subheader("🏆 Top 10 All-Time Performers (Based on 3Y & 5Y Returns)")
         top_10 = df_results.sort_values(by=["5Y %", "3Y %", "1Y %"], ascending=False).head(10)
@@ -205,6 +223,7 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
             use_container_width=True, hide_index=True
         )
 
+    # --- TAB 3: SECTOR ANALYSIS ---
     with tab3:
         st.subheader("🏆 Sector Performance")
         sector_perf = df_results.groupby('Sector')['1Y %'].mean().reset_index()
@@ -212,12 +231,14 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         fig_sector = px.bar(sector_perf, x='Sector', y='1Y %', color='1Y %', color_continuous_scale='RdYlGn')
         fig_sector.update_layout(template="plotly_dark")
         st.plotly_chart(fig_sector, use_container_width=True)
+        
         st.markdown("---")
         selected_sector = st.selectbox("Drill Down: Select a Sector", sector_perf['Sector'].tolist())
         if selected_sector:
             sector_stocks = df_results[df_results['Sector'] == selected_sector].sort_values(by="1Y %", ascending=False)
             st.dataframe(sector_stocks[["Stock", "MCap (Cr)", "1M %", "1Y %", "Trend", "Pattern"]], use_container_width=True, hide_index=True)
 
+    # --- TAB 4: INSTITUTIONAL FLOW ---
     with tab4:
         st.subheader("🏦 FII/DII Activity (Last 7 Days)")
         fii_dii_df = get_fii_dii_data()
@@ -231,7 +252,10 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                     fig_flow.add_trace(go.Bar(x=date_col, y=fii_dii_df['DII Net (₹ Cr)'], name='DII Net', marker_color='cyan'))
                 fig_flow.update_layout(barmode='group', template='plotly_dark')
                 st.plotly_chart(fig_flow, use_container_width=True)
+        else:
+            st.warning("Could not load FII/DII data right now.")
 
+    # --- TAB 5: METALS ---
     with tab5:
         st.subheader("🥇 Metal Comparison")
         metals = {'Gold': 'GC=F', 'Silver': 'SI=F', 'Copper': 'HG=F', 'Platinum': 'PL=F', 'Palladium': 'PA=F'}
@@ -254,7 +278,10 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                 fig_metal.add_trace(go.Scatter(x=plot_metals.index, y=plot_metals[col], mode='lines', name=col))
             fig_metal.update_layout(title=f"Metal Performance ({metal_time})", template="plotly_dark", height=500)
             st.plotly_chart(fig_metal, use_container_width=True)
+        else:
+            st.warning("Could not load metal data.")
 
+    # --- TAB 6: BUY/SELL & TELEGRAM ---
     with tab6:
         st.subheader("📈 Actionable Buy/Sell Signals")
         if st.button("🔄 Generate & Send Alerts"):
@@ -274,7 +301,7 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                         macd_line, macd_signal = macd_obj.macd().iloc[-1], macd_obj.macd_signal().iloc[-1]
                         price = df_hist['Close'].iloc[-1]
                         
-                        # --- NEW EXPANDED LOGIC TO CATCH SELLS ---
+                        # EXPANDED LOGIC (Catches Weak & Strong Signals)
                         if rsi < 40 and macd_line > macd_signal:
                             signal, reason = "🟢 STRONG BUY", "RSI is oversold & MACD just crossed up."
                         elif rsi < 40:
