@@ -6,6 +6,9 @@ on:
     - cron: '15 10 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   run-alerts:
     runs-on: ubuntu-latest
@@ -27,3 +30,15 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python alerts.py
+
+      - name: Update dashboard scan timestamp
+        run: |
+          python -c "import json; from datetime import datetime; from zoneinfo import ZoneInfo; open('scan_status.json','w').write(json.dumps({'last_scan':datetime.now(ZoneInfo('Asia/Kolkata')).strftime('%d %b %Y, %I:%M %p IST')}))"
+
+      - name: Publish scan timestamp
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scan_status.json
+          git diff --cached --quiet || git commit -m "Update scanner timestamp"
+          git push
