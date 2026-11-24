@@ -6,9 +6,27 @@ import plotly.express as px
 import requests
 import io
 from nselib import capital_market
+import ta
 
 st.set_page_config(page_title="Market Master Scanner", layout="wide")
 st.title("📈 Ultimate Market & Sector Scanner")
+
+# ==========================================
+# --- TOP ANALYSIS OVERVIEW BOARD ---
+# ==========================================
+st.markdown("""
+<div style="background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #00FFAA; margin-bottom:20px;">
+    <h4 style="color:#00FFAA; margin-top:0;">🔍 Available Analyses</h4>
+    <ul style="color:#E0E0E0; margin-bottom:0;">
+        <li><b>Stock Scanner:</b> Momentum, Volume Spikes, & Multi-Period Returns (1M, 6M, 1Y, 3Y, 5Y).</li>
+        <li><b>Sector Analysis:</b> Average 3-Year Sector Returns & Drill-Down.</li>
+        <li><b>Institutional Flow:</b> FII/DII Net Buying/Selling (Last 7 Days).</li>
+        <li><b>Metal Comparison:</b> Line chart comparing Gold, Silver, Copper, Aluminum, Platinum (1M to 10Y).</li>
+        <li><b>Buy/Sell Signals:</b> Interactive RSI & MACD charts with adjustable thresholds.</li>
+        <li><b>Sensex Overview:</b> Multi-period performance (1M, 6M, 1Y, 3Y, 5Y).</li>
+    </ul>
+</div>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # --- RETRACTABLE HISTORICAL NEWS TAB ---
@@ -30,7 +48,9 @@ with st.expander("🚨 Click here to view Top 10 Historical News Events That Mov
     st.dataframe(df_news, use_container_width=True, hide_index=True)
     st.info("💡 Understanding historical market crashes helps gauge sentiment during current volatility.")
 
+# ==========================================
 # --- SIDEBAR CONTROLS ---
+# ==========================================
 st.sidebar.header("Scanner Settings")
 scan_size = st.sidebar.selectbox("How many stocks to scan?", ["Nifty 50 (Fast)", "Nifty 100", "Nifty 500 (Slow)"], index=1)
 
@@ -40,7 +60,9 @@ market_cap_filter = st.sidebar.selectbox(
     index=0
 )
 
-# --- 1. DYNAMICALLY FETCH STOCK LIST ---
+# ==========================================
+# --- CACHED DATA FETCHING FUNCTIONS ---
+# ==========================================
 @st.cache_data(ttl=86400)
 def get_nifty_symbols():
     try:
@@ -54,26 +76,24 @@ def get_nifty_symbols():
             return symbols
     except:
         pass
-
     fallback = [
         "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", "BHARTIARTL", "ITC", "LT", "KOTAKBANK",
         "AXISBANK", "HINDUNILVR", "BAJFINANCE", "MARUTI", "TATASTEEL", "SUNPHARMA", "TITAN", "ULTRACEMCO",
         "WIPRO", "NESTLEIND", "POWERGRID", "NTPC", "TECHM", "HCLTECH", "ADANIENT", "ADANIPORTS", "APOLLOHOSP",
         "ASIANPAINT", "BAJAJ-AUTO", "BEL", "BPCL", "BRITANNIA", "CIPLA", "COALINDIA", "DIVISLAB",
         "DRREDDY", "EICHERMOT", "GRASIM", "HDFCLIFE", "HEROMOTOCO", "HINDALCO", "ICICIGI", "ICICIPRULI",
-        "INDUSINDBK", "JSWSTEEL", "LTIM", "LTTS", "M&M", "ONGC", "PIDILITIND", "SBILIFE", "SHRIRAMFIN", 
-        "TATACHEM", "TATACONSUM", "TATAMOTORS", "TATAPOWER", "ZOMATO", "PAYTM", "NYKAA", "POLICYBZR", 
-        "DMART", "IRCTC", "IRFC", "RVNL", "HUDCO", "BHEL", "HAL", "MAZDOCK", "COCHINSHIP", "BDL", 
-        "SOLARINDS", "SUZLON", "YESBANK", "IDEA", "PNB", "BANKBARODA", "CANBK", "UNIONBANK", "IOB", 
-        "CENTRALBK", "VEDL", "NMDC", "SAIL", "JINDALSTEL", "HINDZINC", "NATIONALUM", "HINDCOPPER", 
-        "DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE", "LODHA", "PHOENIXLTD", "MUTHOOTFIN", "CHOLAFIN", 
-        "BAJAJFINSV", "ABFRL", "TRENT", "VBL", "UBL", "MCDOWELL-N", "PGHH", "DABUR", "GODREJCP", "MARICO", 
+        "INDUSINDBK", "JSWSTEEL", "LTIM", "LTTS", "M&M", "ONGC", "PIDILITIND", "SBILIFE", "SHRIRAMFIN",
+        "TATACHEM", "TATACONSUM", "TATAMOTORS", "TATAPOWER", "ZOMATO", "PAYTM", "NYKAA", "POLICYBZR",
+        "DMART", "IRCTC", "IRFC", "RVNL", "HUDCO", "BHEL", "HAL", "MAZDOCK", "COCHINSHIP", "BDL",
+        "SOLARINDS", "SUZLON", "YESBANK", "IDEA", "PNB", "BANKBARODA", "CANBK", "UNIONBANK", "IOB",
+        "CENTRALBK", "VEDL", "NMDC", "SAIL", "JINDALSTEL", "HINDZINC", "NATIONALUM", "HINDCOPPER",
+        "DLF", "GODREJPROP", "OBEROIRLTY", "PRESTIGE", "LODHA", "PHOENIXLTD", "MUTHOOTFIN", "CHOLAFIN",
+        "BAJAJFINSV", "ABFRL", "TRENT", "VBL", "UBL", "MCDOWELL-N", "PGHH", "DABUR", "GODREJCP", "MARICO",
         "COLPAL", "PIIND", "UPL", "SRF", "BALKRISIND", "MRF", "MOTHERSON", "BOSCHLTD", "APOLLOTYRE",
         "ESDS", "POLYCAB", "KPITTECH", "CGPOWER"
     ]
     return list(set(fallback))
 
-# --- 2. FETCH SECTOR & MARKET CAP DATA ---
 @st.cache_data(ttl=86400)
 def get_stock_metadata(symbols):
     meta = {}
@@ -92,7 +112,6 @@ def get_stock_metadata(symbols):
             meta[sym] = {"Sector": "Other", "Industry": "Other", "MarketCap_Cr": 0}
     return meta
 
-# --- 3. FETCH FII/DII DATA ---
 @st.cache_data(ttl=3600)
 def get_fii_dii_data():
     try:
@@ -104,14 +123,15 @@ def get_fii_dii_data():
     except Exception:
         return pd.DataFrame()
 
-# --- 4. DOWNLOAD PRICE DATA ---
 @st.cache_data(ttl=3600)
-def download_price_data(symbols, period="3y"):
+def download_price_data(symbols, period="5y"): # Changed to 5y to cover all return periods
     tickers = " ".join([s if s.endswith(".NS") else s + ".NS" for s in symbols])
     data = yf.download(tickers, period=period, interval="1d", group_by='ticker', progress=False)
     return data
 
-# --- MAIN LOGIC ---
+# ==========================================
+# --- MAIN APP LOGIC & TABS ---
+# ==========================================
 if st.button("🚀 Fetch Data & Build Dashboard"):
     all_symbols = get_nifty_symbols()
     small_cap_etfs = ["HDFCSML250.NS", "MOSMALL250.NS"]
@@ -120,33 +140,35 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
     elif scan_size == "Nifty 100": target_symbols = list(set(all_symbols[:100] + small_cap_etfs))
     else: target_symbols = list(set(all_symbols + small_cap_etfs))
 
-    with st.spinner(f"Downloading 3-Year Data for {len(target_symbols)} stocks. Please wait..."):
-        price_data = download_price_data(target_symbols, period="3y")
+    with st.spinner(f"Downloading 5-Year Data for {len(target_symbols)} stocks. Please wait..."):
+        price_data = download_price_data(target_symbols, period="5y") # Updated to 5y
         meta_map = get_stock_metadata(target_symbols)
         
         results = []
         for symbol in target_symbols:
             try:
                 ticker_key = symbol if symbol.endswith(".NS") else symbol + ".NS"
-                
                 if len(target_symbols) == 1: df = price_data
                 else: df = price_data[ticker_key]
-                
                 df = df.dropna()
                 if len(df) < 50: continue
 
                 current_price = df['Close'].iloc[-1]
                 mcap_cr = meta_map.get(symbol, {}).get("MarketCap_Cr", 0)
 
+                # Apply Market Cap Filter
                 if market_cap_filter == "Large Cap (>50k Cr)" and mcap_cr < 50000: continue
                 if market_cap_filter == "Mid Cap (18k-50k Cr)" and (mcap_cr < 18000 or mcap_cr > 50000): continue
                 if market_cap_filter == "Small Cap (<18k Cr)" and mcap_cr > 18000: continue
 
+                # Calculate Multi-Period Returns (1M, 6M, 1Y, 3Y, 5Y)
                 ret_1m = ((current_price - df['Close'].iloc[-21]) / df['Close'].iloc[-21]) * 100 if len(df) > 21 else 0
-                price_1y_ago = df['Close'].iloc[-252] if len(df) > 252 else df['Close'].iloc[0]
-                ret_1y = ((current_price - price_1y_ago) / price_1y_ago) * 100
-                price_3y_ago = df['Close'].iloc[0]
+                ret_6m = ((current_price - df['Close'].iloc[-126]) / df['Close'].iloc[-126]) * 100 if len(df) > 126 else 0
+                ret_1y = ((current_price - df['Close'].iloc[-252]) / df['Close'].iloc[-252]) * 100 if len(df) > 252 else 0
+                price_3y_ago = df['Close'].iloc[-756] if len(df) > 756 else df['Close'].iloc[0]
                 ret_3y = ((current_price - price_3y_ago) / price_3y_ago) * 100
+                price_5y_ago = df['Close'].iloc[0]
+                ret_5y = ((current_price - price_5y_ago) / price_5y_ago) * 100
 
                 sma_50 = df['Close'].rolling(50).mean().iloc[-1]
                 trend = "🟢 Up" if current_price > sma_50 else "🔴 Down"
@@ -158,66 +180,62 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
                 results.append({
                     "Stock": symbol.replace(".NS", ""),
                     "Sector": meta_map.get(symbol, {}).get("Sector", "Other"),
-                    "Industry": meta_map.get(symbol, {}).get("Industry", "Other"), 
+                    "Industry": meta_map.get(symbol, {}).get("Industry", "Other"),
                     "MCap (Cr)": round(mcap_cr, 0),
                     "Price": round(float(current_price), 2),
                     "1M Ret %": round(float(ret_1m), 1),
+                    "6M Ret %": round(float(ret_6m), 1),
                     "1Y Ret %": round(float(ret_1y), 1),
                     "3Y Ret %": round(float(ret_3y), 1),
+                    "5Y Ret %": round(float(ret_5y), 1),
                     "Trend": trend,
                     "Volume Signal": volume_spike
                 })
             except:
                 continue 
-
         st.session_state.df_results = pd.DataFrame(results)
 
 # ==========================================
-# RENDER DASHBOARD
+# --- RENDER DASHBOARD TABS ---
 # ==========================================
 if 'df_results' in st.session_state and not st.session_state.df_results.empty:
     df_results = st.session_state.df_results
     
-    tab1, tab2, tab3 = st.tabs(["📊 Stock Scanner", "🏢 Sector Analysis", "🏦 Institutional Flow (FII/DII)"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Stock Scanner", "🏢 Sector Analysis", "🏦 Institutional Flow (FII/DII)",
+        "🥇 Metal Comparison", "📈 Buy/Sell Signals", "📉 Sensex Overview"
+    ])
 
-    # --- TAB 1: STOCK SCANNER ---
+    # --- TAB 1: STOCK SCANNER (UPDATED) ---
     with tab1:
         st.subheader(f"Stock Performance (Found {len(df_results)} stocks)")
         df_sorted = df_results.sort_values(by=["Volume Signal", "1Y Ret %"], ascending=[False, False])
         
+        # Show new return columns
         st.dataframe(
-            df_sorted[["Stock", "Sector", "MCap (Cr)", "Price", "1M Ret %", "1Y Ret %", "3Y Ret %", "Trend", "Volume Signal"]], 
+            df_sorted[["Stock", "Sector", "MCap (Cr)", "Price", "1M Ret %", "6M Ret %", "1Y Ret %", "3Y Ret %", "5Y Ret %", "Trend", "Volume Signal"]],
             use_container_width=True, hide_index=True
         )
 
         st.markdown("---")
-        
         col_chart, col_news = st.columns([2, 1])
-        
         with col_chart:
             st.subheader("📉 Candlestick Chart")
             selected_stock = st.selectbox("Select a stock to view chart:", df_sorted['Stock'].tolist())
-            
             if selected_stock:
                 chart_data = yf.download(selected_stock + ".NS", period="1y", interval="1d", progress=False)
                 if isinstance(chart_data.columns, pd.MultiIndex):
                     chart_data.columns = chart_data.columns.get_level_values(0)
                 chart_data = chart_data.dropna()
-                
-                fig = go.Figure(data=[go.Candlestick(
-                    x=chart_data.index, open=chart_data['Open'], high=chart_data['High'],
-                    low=chart_data['Low'], close=chart_data['Close']
-                )])
+                fig = go.Figure(data=[go.Candlestick(x=chart_data.index, open=chart_data['Open'], high=chart_data['High'], low=chart_data['Low'], close=chart_data['Close'])])
                 fig.update_layout(title=f"{selected_stock} - 1 Year Chart", xaxis_rangeslider_visible=False, template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
-
         with col_news:
             st.subheader(f"📰 Latest News")
             if selected_stock:
                 try:
                     ticker_info = yf.Ticker(selected_stock + ".NS")
                     news = ticker_info.news
-                    
                     if not news:
                         st.info("No recent news found for this stock.")
                     else:
@@ -227,7 +245,6 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                             publisher = article.get('publisher', 'Unknown')
                             pub_time = article.get('providerPublishTime', None)
                             time_str = pd.to_datetime(pub_time, unit='s').strftime('%b %d, %H:%M') if pub_time else "Recent"
-                            
                             st.markdown(f"**[{title}]({link})**")
                             st.caption(f"Source: {publisher} | {time_str}")
                             st.markdown("---")
@@ -239,32 +256,23 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         st.subheader("🏆 Sector Performance (Past 3 Years)")
         sector_perf = df_results.groupby('Sector')['3Y Ret %'].mean().reset_index()
         sector_perf = sector_perf.sort_values(by='3Y Ret %', ascending=False)
-
-        fig_sector = px.bar(
-            sector_perf, x='Sector', y='3Y Ret %', 
-            color='3Y Ret %', color_continuous_scale='RdYlGn',
-            title="Average 3-Year Return by Sector (%)"
-        )
+        fig_sector = px.bar(sector_perf, x='Sector', y='3Y Ret %', color='3Y Ret %', color_continuous_scale='RdYlGn', title="Average 3-Year Return by Sector (%)")
         fig_sector.update_layout(template="plotly_dark")
         st.plotly_chart(fig_sector, use_container_width=True)
-
         st.markdown("---")
         st.subheader("🔍 Drill Down: Stocks inside a Sector")
         selected_sector = st.selectbox("Select a Sector:", sector_perf['Sector'].tolist())
-        
         if selected_sector:
             sector_stocks = df_results[df_results['Sector'] == selected_sector]
             sector_stocks = sector_stocks.sort_values(by="3Y Ret %", ascending=False)
             st.write(f"Showing stocks in the **{selected_sector}** sector:")
-            st.dataframe(sector_stocks[["Stock", "Industry", "MCap (Cr)", "1Y Ret %", "3Y Ret %", "Trend"]], use_container_width=True, hide_index=True)
+            st.dataframe(sector_stocks[["Stock", "Industry", "MCap (Cr)", "1Y Ret %", "3Y Ret %", "5Y Ret %", "Trend"]], use_container_width=True, hide_index=True)
 
     # --- TAB 3: INSTITUTIONAL FLOW ---
     with tab3:
         st.subheader("🏦 Foreign & Domestic Institutional Activity (Last 7 Days)")
         st.write("Positive numbers mean **buying**, negative means **selling**.")
-        
         fii_dii_df = get_fii_dii_data()
-        
         if not fii_dii_df.empty:
             st.dataframe(fii_dii_df, use_container_width=True, hide_index=True)
             date_col = 'Date' if 'Date' in fii_dii_df.columns else fii_dii_df.index
@@ -277,3 +285,141 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                 st.plotly_chart(fig_flow, use_container_width=True)
         else:
             st.warning("Could not load FII/DII data at this moment. The NSE API might be busy. Please try again in a few minutes.")
+
+    # --- TAB 4: METAL COMPARISON (NEW) ---
+    with tab4:
+        st.subheader("🥇 Metal Performance Comparison")
+        st.write("Compare the performance of major metals over different time horizons.")
+        
+        # Metal tickers: Gold, Silver, Copper, Aluminum, Platinum
+        metals = {'Gold': 'GC=F', 'Silver': 'SI=F', 'Copper': 'HG=F', 'Aluminum': 'ALI=F', 'Platinum': 'PL=F'}
+        
+        @st.cache_data(ttl=3600)
+        def get_metal_data():
+            data = {}
+            for name, ticker in metals.items():
+                try:
+                    df = yf.download(ticker, period="10y", interval="1d", progress=False)
+                    if not df.empty:
+                        data[name] = df['Close']
+                except:
+                    pass
+            return pd.DataFrame(data)
+        
+        metal_df = get_metal_data()
+        
+        if not metal_df.empty:
+            # Normalize all metals to 100 at the start for direct comparison
+            normalized_df = (metal_df / metal_df.iloc[0]) * 100
+            
+            fig_metal = go.Figure()
+            for col in normalized_df.columns:
+                fig_metal.add_trace(go.Scatter(x=normalized_df.index, y=normalized_df[col], mode='lines', name=col))
+            
+            fig_metal.update_layout(title="Metal Performance Comparison (Normalized to 100)", template="plotly_dark", height=500)
+            st.plotly_chart(fig_metal, use_container_width=True)
+            
+            st.subheader("📊 Metal Returns by Period")
+            periods = {'1M': 21, '6M': 126, '1Y': 252, '3Y': 756, '5Y': 1260, '10Y': 2520}
+            returns_data = []
+            for name in metal_df.columns:
+                row = {'Metal': name}
+                for p_name, p_days in periods.items():
+                    if len(metal_df) > p_days:
+                        ret = ((metal_df[name].iloc[-1] - metal_df[name].iloc[-p_days]) / metal_df[name].iloc[-p_days]) * 100
+                        row[p_name] = round(float(ret), 1)
+                    else:
+                        row[p_name] = None
+                returns_data.append(row)
+            st.dataframe(pd.DataFrame(returns_data), use_container_width=True, hide_index=True)
+        else:
+            st.warning("Could not load metal data.")
+
+    # --- TAB 5: BUY/SELL SIGNALS (NEW) ---
+    with tab5:
+        st.subheader("📈 Interactive Buy/Sell Signal Chart")
+        signal_stock = st.selectbox("Select a stock for signal analysis:", df_results['Stock'].tolist())
+        
+        # Sliders for indicator thresholds
+        col_slider1, col_slider2 = st.columns(2)
+        with col_slider1:
+            rsi_lower = st.slider("RSI Oversold Level (Buy Signal)", 10, 50, 30)
+        with col_slider2:
+            rsi_upper = st.slider("RSI Overbought Level (Sell Signal)", 50, 90, 70)
+            
+        if signal_stock:
+            with st.spinner("Calculating indicators..."):
+                df_sig = yf.download(signal_stock + ".NS", period="1y", interval="1d", progress=False)
+                if isinstance(df_sig.columns, pd.MultiIndex):
+                    df_sig.columns = df_sig.columns.get_level_values(0)
+                df_sig = df_sig.dropna()
+                
+                if not df_sig.empty:
+                    # Calculate RSI and MACD
+                    df_sig['RSI'] = ta.momentum.RSIIndicator(df_sig['Close'], window=14).rsi()
+                    macd = ta.trend.MACD(df_sig['Close'])
+                    df_sig['MACD'] = macd.macd()
+                    df_sig['MACD_Signal'] = macd.macd_signal()
+                    
+                    # Create subplots: Price on top, RSI middle, MACD bottom
+                    from plotly.subplots import make_subplots
+                    fig_sig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
+                    
+                    # 1. Price
+                    fig_sig.add_trace(go.Candlestick(x=df_sig.index, open=df_sig['Open'], high=df_sig['High'], low=df_sig['Low'], close=df_sig['Close'], name="Price"), row=1, col=1)
+                    
+                    # 2. RSI with threshold lines
+                    fig_sig.add_trace(go.Scatter(x=df_sig.index, y=df_sig['RSI'], name="RSI", line=dict(color='purple')), row=2, col=1)
+                    fig_sig.add_hline(y=rsi_lower, line_dash="dash", line_color="green", row=2, col=1)
+                    fig_sig.add_hline(y=rsi_upper, line_dash="dash", line_color="red", row=2, col=1)
+                    
+                    # 3. MACD
+                    fig_sig.add_trace(go.Scatter(x=df_sig.index, y=df_sig['MACD'], name="MACD", line=dict(color='blue')), row=3, col=1)
+                    fig_sig.add_trace(go.Scatter(x=df_sig.index, y=df_sig['MACD_Signal'], name="MACD Signal", line=dict(color='orange')), row=3, col=1)
+                    
+                    fig_sig.update_layout(title=f"{signal_stock} - Buy/Sell Signals (RSI & MACD)", template="plotly_dark", xaxis_rangeslider_visible=False, height=800)
+                    st.plotly_chart(fig_sig, use_container_width=True)
+                    
+                    st.info(f"💡 **How to use:** RSI below {rsi_lower} suggests oversold (potential **Buy**). RSI above {rsi_upper} suggests overbought (potential **Sell**). MACD crossing above its signal line is bullish; crossing below is bearish.")
+                else:
+                    st.error("Could not load price data for this stock.")
+
+    # --- TAB 6: SENSEX OVERVIEW (NEW) ---
+    with tab6:
+        st.subheader("📉 S&P BSE SENSEX Performance")
+        
+        @st.cache_data(ttl=3600)
+        def get_sensex_data():
+            try:
+                df_sensex = yf.download("^BSESN", period="5y", interval="1d", progress=False)
+                return df_sensex
+            except:
+                return pd.DataFrame()
+        
+        sensex_df = get_sensex_data()
+        
+        if not sensex_df.empty:
+            if isinstance(sensex_df.columns, pd.MultiIndex):
+                sensex_df.columns = sensex_df.columns.get_level_values(0)
+            sensex_df = sensex_df.dropna()
+            
+            # Multi-period returns
+            sensex_price = sensex_df['Close'].iloc[-1]
+            sensex_returns = []
+            periods = {'1M': 21, '6M': 126, '1Y': 252, '3Y': 756, '5Y': 1260}
+            for p_name, p_days in periods.items():
+                if len(sensex_df) > p_days:
+                    ret = ((sensex_price - sensex_df['Close'].iloc[-p_days]) / sensex_df['Close'].iloc[-p_days]) * 100
+                    sensex_returns.append({'Period': p_name, 'Return (%)': round(float(ret), 1)})
+                else:
+                    sensex_returns.append({'Period': p_name, 'Return (%)': None})
+            
+            st.subheader("📊 Multi-Period Returns")
+            st.dataframe(pd.DataFrame(sensex_returns), use_container_width=True, hide_index=True)
+            
+            st.subheader("📈 Sensex Price Chart (5 Years)")
+            fig_sensex = go.Figure(data=[go.Candlestick(x=sensex_df.index, open=sensex_df['Open'], high=sensex_df['High'], low=sensex_df['Low'], close=sensex_df['Close'], name="Sensex")])
+            fig_sensex.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=600, title="Sensex 5-Year Chart")
+            st.plotly_chart(fig_sensex, use_container_width=True)
+        else:
+            st.warning("Could not load Sensex data. Please try again later.")
