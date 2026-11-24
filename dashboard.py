@@ -21,10 +21,10 @@ st.markdown("""
     <ul style="color:#E0E0E0; margin-bottom:0;">
         <li><b>Sensex Overview:</b> Multi-period performance & interactive timeline slider.</li>
         <li><b>Stock Scanner:</b> Momentum, Volume Spikes, & Multi-Period Returns (1M, 6M, 1Y, 3Y, 5Y).</li>
-        <li><b>Sector Analysis:</b> Average 3-Year Sector Returns & Drill-Down (Now uses exact NSE data).</li>
+        <li><b>Sector Analysis:</b> Average 3-Year Sector Returns & Drill-Down.</li>
         <li><b>Institutional Flow:</b> FII/DII Net Buying/Selling (Last 7 Days).</li>
         <li><b>Metal Comparison:</b> Compare Gold, Silver, Copper, Platinum, Palladium with a timeline slider.</li>
-        <li><b>Buy/Sell Signals:</b> Interactive RSI & MACD charts with real-time Buy/Sell recommendations.</li>
+        <li><b>Buy/Sell Signals:</b> Actionable summary table + Interactive charts with layman explanations.</li>
     </ul>
 </div>
 """, unsafe_allow_html=True)
@@ -66,7 +66,6 @@ market_cap_filter = st.sidebar.selectbox(
 # ==========================================
 @st.cache_data(ttl=86400)
 def get_nse_data():
-    """Fetches the official Nifty 500 list and extracts exact Industry/Sector data."""
     try:
         url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -74,17 +73,14 @@ def get_nse_data():
         response.raise_for_status()
         df = pd.read_csv(io.StringIO(response.text))
         symbols = df['Symbol'].tolist()
-        # Map Symbol to Industry (which serves as the Sector)
         sector_map = dict(zip(df['Symbol'], df['Industry']))
         return symbols, sector_map
     except:
-        # Fallback if NSE blocks
         fallback = ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", "BHARTIARTL", "ITC", "LT", "KOTAKBANK", "AXISBANK", "HINDUNILVR", "BAJFINANCE", "MARUTI"]
         return fallback, {sym: "Unknown" for sym in fallback}
 
 @st.cache_data(ttl=86400)
 def get_stock_metadata(symbols, nse_sector_map):
-    """Fetches Market Cap from Yahoo Finance, and uses NSE map for Sector."""
     meta = {}
     for sym in symbols:
         sector = nse_sector_map.get(sym.replace(".NS", ""), "Other")
@@ -146,7 +142,6 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
                 if market_cap_filter == "Mid Cap (18k-50k Cr)" and (mcap_cr < 18000 or mcap_cr > 50000): continue
                 if market_cap_filter == "Small Cap (<18k Cr)" and mcap_cr > 18000: continue
 
-                # Calculate Returns
                 ret_1m = ((current_price - df['Close'].iloc[-21]) / df['Close'].iloc[-21]) * 100 if len(df) > 21 else 0
                 ret_6m = ((current_price - df['Close'].iloc[-126]) / df['Close'].iloc[-126]) * 100 if len(df) > 126 else 0
                 ret_1y = ((current_price - df['Close'].iloc[-252]) / df['Close'].iloc[-252]) * 100 if len(df) > 252 else 0
@@ -185,16 +180,14 @@ if st.button("🚀 Fetch Data & Build Dashboard"):
 if 'df_results' in st.session_state and not st.session_state.df_results.empty:
     df_results = st.session_state.df_results
     
-    # TAB 1 is now Sensex Overview
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📉 Sensex Overview", "📊 Stock Scanner", "🏢 Sector Analysis", 
         "🏦 Institutional Flow", "🥇 Metal Comparison", "📈 Buy/Sell Signals"
     ])
 
-    # --- TAB 1: SENSEX OVERVIEW (NEW SLIDER) ---
+    # --- TAB 1: SENSEX OVERVIEW ---
     with tab1:
         st.subheader("📉 S&P BSE SENSEX Performance")
-        
         @st.cache_data(ttl=3600)
         def get_sensex_data():
             try:
@@ -203,16 +196,13 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                 return pd.DataFrame()
         
         sensex_df = get_sensex_data()
-        
         if not sensex_df.empty:
             if isinstance(sensex_df.columns, pd.MultiIndex):
                 sensex_df.columns = sensex_df.columns.get_level_values(0)
             sensex_df = sensex_df.dropna()
-            
             sensex_price = sensex_df['Close'].iloc[-1]
             periods = {'1M': 21, '6M': 126, '1Y': 252, '3Y': 756, '5Y': 1260}
             
-            # Returns Table
             sensex_returns = []
             for p_name, p_days in periods.items():
                 if len(sensex_df) > p_days:
@@ -224,7 +214,6 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
             st.subheader("📊 Multi-Period Returns")
             st.dataframe(pd.DataFrame(sensex_returns), use_container_width=True, hide_index=True)
             
-            # Chart Slider
             st.subheader("📈 Sensex Chart")
             selected_period = st.select_slider("Select Timeframe", options=["1M", "6M", "1Y", "3Y", "5Y"], value="1Y")
             days_to_show = periods[selected_period]
@@ -240,7 +229,6 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
     with tab2:
         st.subheader(f"Stock Performance (Found {len(df_results)} stocks)")
         df_sorted = df_results.sort_values(by=["Volume Signal", "1Y Ret %"], ascending=[False, False])
-        
         st.dataframe(
             df_sorted[["Stock", "Sector", "MCap (Cr)", "Price", "1M Ret %", "6M Ret %", "1Y Ret %", "3Y Ret %", "5Y Ret %", "Trend", "Volume Signal"]],
             use_container_width=True, hide_index=True
@@ -315,11 +303,9 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         else:
             st.warning("Could not load FII/DII data at this moment. The NSE API might be busy. Please try again in a few minutes.")
 
-    # --- TAB 5: METAL COMPARISON (NEW SLIDER & METALS) ---
+    # --- TAB 5: METAL COMPARISON ---
     with tab5:
         st.subheader("🥇 Metal Performance Comparison")
-        
-        # Added Palladium and timeframe slider
         metals = {'Gold': 'GC=F', 'Silver': 'SI=F', 'Copper': 'HG=F', 'Platinum': 'PL=F', 'Palladium': 'PA=F'}
         
         @st.cache_data(ttl=3600)
@@ -340,10 +326,7 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         metal_df = get_metal_data()
         
         if not metal_df.empty:
-            # Normalize
             normalized_df = (metal_df / metal_df.iloc[0]) * 100
-            
-            # Slider for Metals
             metal_time = st.select_slider("Select Metal Timeframe", options=["1M", "6M", "1Y", "3Y", "5Y", "10Y"], value="5Y")
             days_map = {"1M": 21, "6M": 126, "1Y": 252, "3Y": 756, "5Y": 1260, "10Y": 2520}
             plot_metals = normalized_df.tail(days_map[metal_time]) if len(normalized_df) > days_map[metal_time] else normalized_df
@@ -371,10 +354,64 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
         else:
             st.warning("Could not load metal data.")
 
-    # --- TAB 6: BUY/SELL SIGNALS (NEW RECOMMENDATION) ---
+    # --- TAB 6: BUY/SELL SIGNALS & ACTIONABLE TABLE ---
     with tab6:
-        st.subheader("📈 Interactive Buy/Sell Signal Chart")
-        signal_stock = st.selectbox("Select a stock for signal analysis:", df_results['Stock'].tolist())
+        st.subheader("📈 Actionable Buy/Sell Signals")
+        
+        st.write("Click the button below to scan your current stock list and find the strongest Buy or Sell setups.")
+        if st.button("🔄 Generate Buy/Sell Summary Table"):
+            with st.spinner("Analyzing RSI and MACD for all stocks..."):
+                signal_list = []
+                for stock in df_results['Stock'].tolist():
+                    try:
+                        ticker = stock + ".NS"
+                        df_hist = yf.download(ticker, period="3mo", interval="1d", progress=False)
+                        if isinstance(df_hist.columns, pd.MultiIndex):
+                            df_hist.columns = df_hist.columns.get_level_values(0)
+                        df_hist = df_hist.dropna()
+                        if len(df_hist) < 30: continue
+                        
+                        # Calculate latest indicators
+                        rsi = ta.momentum.RSIIndicator(df_hist['Close'], window=14).rsi().iloc[-1]
+                        macd_obj = ta.trend.MACD(df_hist['Close'])
+                        macd_line = macd_obj.macd().iloc[-1]
+                        macd_signal = macd_obj.macd_signal().iloc[-1]
+                        price = df_hist['Close'].iloc[-1]
+                        
+                        # Logic for signals
+                        if rsi < 40 and macd_line > macd_signal:
+                            signal = "🟢 BUY"
+                            reason = "Price is beaten down (RSI is low), but momentum is just starting to turn upwards (MACD crossed up). Good entry point."
+                        elif rsi > 65 and macd_line < macd_signal:
+                            signal = "🔴 SELL"
+                            reason = "Price has run up a lot (RSI is high), and upward momentum is fading (MACD crossed down). Consider booking profits."
+                        else:
+                            continue # Skip neutral stocks to keep the list clean
+                            
+                        signal_list.append({
+                            "Stock": stock,
+                            "Current Price": round(price, 2),
+                            "RSI": round(rsi, 1),
+                            "Action": signal,
+                            "Why? (Simple Explanation)": reason
+                        })
+                    except:
+                        continue
+                
+                if signal_list:
+                    st.session_state.signal_df = pd.DataFrame(signal_list)
+                else:
+                    st.session_state.signal_df = pd.DataFrame()
+                    st.info("Market is mostly neutral right now. No strong Buy/Sell setups found in your list.")
+
+        # Display the table if it exists in memory
+        if 'signal_df' in st.session_state and not st.session_state.signal_df.empty:
+            st.markdown("### 📋 Summary of Best Opportunities")
+            st.dataframe(st.session_state.signal_df, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        st.subheader("🔍 Interactive Chart & Deep Dive")
+        signal_stock = st.selectbox("Select a specific stock to view detailed chart:", df_results['Stock'].tolist())
         
         col_slider1, col_slider2 = st.columns(2)
         with col_slider1:
@@ -395,12 +432,10 @@ if 'df_results' in st.session_state and not st.session_state.df_results.empty:
                     df_sig['MACD'] = macd.macd()
                     df_sig['MACD_Signal'] = macd.macd_signal()
                     
-                    # GET LATEST VALUES FOR RECOMMENDATION
                     last_rsi = df_sig['RSI'].iloc[-1]
                     last_macd = df_sig['MACD'].iloc[-1]
                     last_signal = df_sig['MACD_Signal'].iloc[-1]
                     
-                    # SHOW RECOMMENDATION
                     if last_rsi < rsi_lower and last_macd > last_signal:
                         st.success(f"🟢 **Recommendation: BUY**. Latest RSI is {last_rsi:.1f} (Oversold) and MACD crossed above the signal line.")
                     elif last_rsi > rsi_upper and last_macd < last_signal:
