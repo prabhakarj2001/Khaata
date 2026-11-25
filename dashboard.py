@@ -963,7 +963,7 @@ if (
                 elif risk <= 7: core_pct = 0.25
                 else: core_pct = interpolate(risk, 0, 0.10, 0)
                 
-                # FIXED: Gold trend error using .squeeze() to prevent Series ambiguity
+                # Gold trend error fix using .squeeze()
                 gold_pct = 0.0
                 try:
                     gold_df = yf.download("GC=F", period="1y", interval="1d", progress=False)
@@ -977,12 +977,20 @@ if (
                 except: pass
                 
                 st.write("**Risk Parameters Applied:**")
-                st.dataframe(pd.DataFrame([{
-                    "Positions": num_pos, "Max Stock %": f"{max_w*100:.1f}%", "Max Sector %": f"{max_sec_w*100:.1f}%",
-                    "Vol Cap": "None" if vol_cap >= 1.0 else f"{vol_cap*100:.0f}%", "Liq Floor (₹Cr)": f"{liq_floor:.0f}",
-                    "Stop Mult": f"{stop_mult:.1f}x ATR", "Cash Buffer": f"{cash_buffer*100:.0f}%", 
-                    "Core ETF": f"{core_pct*100:.0f}%", "Gold Sleeve": f"{gold_pct*100:.0f}%"
-                })]), hide_index=True)
+                
+                # FIXED: Separated dataframe creation to avoid bracket errors
+                params_dict = {
+                    "Positions": num_pos, 
+                    "Max Stock %": f"{max_w*100:.1f}%", 
+                    "Max Sector %": f"{max_sec_w*100:.1f}%",
+                    "Vol Cap": "None" if vol_cap >= 1.0 else f"{vol_cap*100:.0f}%", 
+                    "Liq Floor (₹Cr)": f"{liq_floor:.0f}",
+                    "Stop Mult": f"{stop_mult:.1f}x ATR", 
+                    "Cash Buffer": f"{cash_buffer*100:.0f}%", 
+                    "Core ETF": f"{core_pct*100:.0f}%", 
+                    "Gold Sleeve": f"{gold_pct*100:.0f}%"
+                }
+                st.dataframe(pd.DataFrame([params_dict]), hide_index=True)
 
                 # Scoring
                 eligible = []
@@ -1116,6 +1124,7 @@ if (
                 df_display = df_sel[['Stock', 'Sector', 'Price', 'Weight', 'Shares', 'Invested', 'Stop', 'Momentum', '3M %', 'RSI']].copy()
                 df_display['Weight'] = df_display['Weight'].apply(lambda x: f"{x*100:.1f}%")
                 df_display['Stop'] = df_display['Stop'].round(1)
+                
                 st.dataframe(df_display, hide_index=True, use_container_width=True)
                 
                 if st.button("📤 Send Plan to Telegram"):
