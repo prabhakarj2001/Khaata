@@ -1,5 +1,5 @@
 # ============================================================
-# DASHBOARD.PY — Market Master Scanner + Hot Themes + Theme Search
+# DASHBOARD.PY — Market Master Scanner + Curated Hot Themes
 # Requires: streamlit>=1.40 for st.pills (fallback included)
 # ============================================================
 
@@ -14,7 +14,6 @@ import io
 import ta
 import time
 import math
-import difflib
 from datetime import datetime
 
 st.set_page_config(page_title="Market Master Scanner", layout="wide")
@@ -31,81 +30,372 @@ METALS = {
 }
 
 # ============================================================
-# THEME REGISTRY
+# THEME REGISTRY — curated themes; estimates are not live-verified
 # ============================================================
 THEMES = {
     "Defence": {
         "aliases": ["defense", "arms", "military", "aerospace", "hal", "bel"],
-        "last_reviewed": "2026-11-25",
-        "verified": False,
+        "last_reviewed": "2026-11-26", "verified": False,
         "global_universe": [
-            {"name": "Lockheed Martin", "ticker": "LMT", "country": "US", "flag": "🇺🇸",
-             "market_cap_usd_bn": 115, "thesis": "F-35, missiles, space"},
-            {"name": "RTX", "ticker": "RTX", "country": "US", "flag": "🇺🇸",
-             "market_cap_usd_bn": 165, "thesis": "Patriot, missiles, aerospace"},
-            {"name": "Northrop Grumman", "ticker": "NOC", "country": "US", "flag": "🇺🇸",
-             "market_cap_usd_bn": 72, "thesis": "B-21, space, nuclear"},
-            {"name": "BAE Systems", "ticker": "BA.L", "country": "UK", "flag": "🇬🇧",
-             "market_cap_usd_bn": 55, "thesis": "Eurofighter, submarines"},
-            {"name": "Rheinmetall", "ticker": "RHM.DE", "country": "DE", "flag": "🇩🇪",
-             "market_cap_usd_bn": 28, "thesis": "Ammo, armor (Europe rearm)"},
-            {"name": "Hindustan Aeronautics", "ticker": "HAL.NS", "country": "IN", "flag": "🇮🇳",
-             "market_cap_usd_bn": 38, "thesis": "Tejas, helicopters, engines"},
+            {"name": "Lockheed Martin", "ticker": "LMT", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 115, "thesis": "F-35, missiles, space"},
+            {"name": "RTX", "ticker": "RTX", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 165, "thesis": "Air defence, missiles, aerospace"},
+            {"name": "Northrop Grumman", "ticker": "NOC", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 72, "thesis": "Strategic aircraft, space, systems"},
+            {"name": "BAE Systems", "ticker": "BA.L", "country": "UK", "flag": "🇬🇧", "market_cap_usd_bn": 55, "thesis": "Aircraft, naval and electronic systems"},
+            {"name": "Rheinmetall", "ticker": "RHM.DE", "country": "DE", "flag": "🇩🇪", "market_cap_usd_bn": 28, "thesis": "Land systems and ammunition"},
+            {"name": "Hindustan Aeronautics", "ticker": "HAL.NS", "country": "IN", "flag": "🇮🇳", "market_cap_usd_bn": 38, "thesis": "Aircraft, helicopters, engines"},
         ],
         "india_direct": [
-            {"name": "HAL", "ticker": "HAL.NS", "link": "Aircraft mfg",
-             "reason": "Tejas Mk1A, LCH, engines; order book >₹1.2 L Cr"},
-            {"name": "Bharat Electronics", "ticker": "BEL.NS", "link": "Defence electronics",
-             "reason": "Radars, EW, missiles; top MoD electronics share"},
-            {"name": "Bharat Dynamics", "ticker": "BDL.NS", "link": "Missiles/torpedoes",
-             "reason": "Akash, Astra, Konkurs; stockpile replenishment"},
-            {"name": "Mazagon Dock", "ticker": "MAZDOCK.NS", "link": "Submarines/warships",
-             "reason": "Scorpene subs, destroyers; naval capex"},
-            {"name": "Solar Industries", "ticker": "SOLARINDS.NS", "link": "Ammo/explosives",
-             "reason": "Largest Indian explosives maker; defence exports"},
+            {"name": "HAL", "ticker": "HAL.NS", "link": "Aircraft mfg", "reason": "Tejas, helicopters, engines and aircraft upgrade programs"},
+            {"name": "Bharat Electronics", "ticker": "BEL.NS", "link": "Defence electronics", "reason": "Radars, electronic warfare and communications"},
+            {"name": "Bharat Dynamics", "ticker": "BDL.NS", "link": "Missiles", "reason": "Guided missiles and defence weapon systems"},
+            {"name": "Mazagon Dock", "ticker": "MAZDOCK.NS", "link": "Naval shipbuilding", "reason": "Submarines and warship construction"},
+            {"name": "Solar Industries", "ticker": "SOLARINDS.NS", "link": "Energetics", "reason": "Industrial explosives and defence energetics"},
         ],
         "india_indirect": [
-            {"name": "Data Patterns", "ticker": "DATAPATTNS.NS", "link_type": "Avionics",
-             "reason": "Radar/EW subsystems for HAL/BEL"},
-            {"name": "Apollo Micro Systems", "ticker": "APOLLO.NS", "link_type": "Embedded systems",
-             "reason": "Missile electronics, naval systems"},
-            {"name": "Astra Microwave", "ticker": "ASTRAMICRO.NS", "link_type": "RF/microwave",
-             "reason": "Radar seekers, satellite comms"},
-            {"name": "MTAR Technologies", "ticker": "MTARTECH.NS", "link_type": "Precision eng",
-             "reason": "Nuclear + defense precision components"},
+            {"name": "Data Patterns", "ticker": "DATAPATTNS.NS", "link_type": "Avionics and radar", "reason": "Radar, electronic warfare and aerospace subsystems"},
+            {"name": "Apollo Micro Systems", "ticker": "APOLLO.NS", "link_type": "Embedded systems", "reason": "Embedded electronics for defence platforms"},
+            {"name": "Astra Microwave", "ticker": "ASTRAMICRO.NS", "link_type": "RF/microwave", "reason": "RF, radar and microwave modules"},
+            {"name": "MTAR Technologies", "ticker": "MTARTECH.NS", "link_type": "Precision engineering", "reason": "High precision components for strategic sectors"},
         ],
         "policy_kpis": [
-            {"label": "FY27 defence capex (proposed)", "value": "₹2.19 L Cr", "as_of": "Nov 2026"},
-            {"label": "FY26 defence exports", "value": "₹38,424 Cr", "as_of": "FY26"},
-            {"label": "Export target by 2029", "value": "₹50,000 Cr", "as_of": "Policy"},
-            {"label": "Positive Indigenisation items", "value": "5,417", "as_of": "Aug 2026"},
+            {"label": "FY27 defence allocation (budget estimate)", "value": "~₹6.8 lakh Cr", "as_of": "FY27 budget estimate; verify"},
+            {"label": "FY26 defence exports", "value": "~₹38,000 Cr", "as_of": "FY26 estimate; verify"},
+            {"label": "Export ambition", "value": "₹50,000 Cr", "as_of": "Policy target; verify"},
+            {"label": "Indigenisation lists", "value": "5,000+ items", "as_of": "Public policy tally; verify"},
         ],
         "policy_timeline": [
-            {"year": 2020, "event": "Defence PLI; FDI 74% automatic"},
-            {"year": 2021, "event": "First Positive Indigenisation List (101 items)"},
-            {"year": 2023, "event": "Fourth PIL; defence exports cross ₹15,000 Cr"},
-            {"year": 2025, "event": "Exports ₹23,000+ Cr; 5th/6th PILs notified"},
-            {"year": 2026, "event": "FY27 capex proposed ₹2.19 L Cr; exports ₹38,424 Cr"},
+            {"year": 2020, "event": "Defence production reforms and higher FDI route announced"},
+            {"year": 2021, "event": "Positive indigenisation lists expanded"},
+            {"year": 2023, "event": "Defence exports and domestic procurement emphasis increased"},
+            {"year": 2025, "event": "Additional indigenisation and procurement initiatives"},
+            {"year": 2026, "event": "FY27 budget and export figures require primary-source confirmation"},
         ],
         "risks": [
-            {"risk": "Tejas/engine supply delays", "likelihood": 3, "impact": 5, "category": "Execution"},
-            {"risk": "Budget reallocation away", "likelihood": 2, "impact": 4, "category": "Policy"},
-            {"risk": "Export approval bottlenecks", "likelihood": 3, "impact": 3, "category": "Regulatory"},
-            {"risk": "Private competition erodes PSU share", "likelihood": 3, "impact": 3, "category": "Competition"},
-            {"risk": "Geopolitical de-escalation", "likelihood": 2, "impact": 4, "category": "Macro"},
+            {"risk": "Program execution and engine supply delays", "likelihood": 3, "impact": 5, "category": "Execution"},
+            {"risk": "Procurement or budget slippage", "likelihood": 2, "impact": 4, "category": "Policy"},
+            {"risk": "Export approvals and customer concentration", "likelihood": 3, "impact": 3, "category": "Regulatory"},
+            {"risk": "Valuation and order conversion risk", "likelihood": 4, "impact": 4, "category": "Valuation"},
+            {"risk": "Geopolitical cycle changes", "likelihood": 2, "impact": 4, "category": "Macro"},
         ],
         "watchlist": [
-            {"metric": "MoD capital outlay (FY27)", "current": "₹2.19 L Cr", "threshold": "<₹2.0 L Cr", "source": "MoD", "frequency": "Annual"},
-            {"metric": "Defence exports", "current": "₹38,424 Cr", "threshold": "<₹30,000 Cr", "source": "MoD", "frequency": "Annual"},
-            {"metric": "HAL order book", "current": ">₹1.2 L Cr", "threshold": "<₹1.0 L Cr", "source": "Company", "frequency": "Quarterly"},
-            {"metric": "BEL order inflow", "current": "~₹25,000 Cr/yr", "threshold": "<₹20,000 Cr", "source": "Company", "frequency": "Quarterly"},
+            {"metric": "Defence capital outlay", "current": "FY27 budget figure—verify", "threshold": "Material reduction vs budget", "source": "Ministry of Defence / Union Budget", "frequency": "Annual"},
+            {"metric": "Defence exports", "current": "Latest FY figure—verify", "threshold": "Below trend or target", "source": "MoD / PIB", "frequency": "Annual"},
+            {"metric": "HAL order book", "current": "Company-reported—verify", "threshold": "Order book/annual sales below 3x", "source": "HAL filings", "frequency": "Quarterly"},
+            {"metric": "BEL order inflow", "current": "Company-reported—verify", "threshold": "Inflow below revenue run-rate", "source": "BEL filings", "frequency": "Quarterly"},
         ],
-        "source_urls": [
-            "https://www.angelone.in/news/Economy/hal-bel-and-other-defence-stocks-in-focus-as-defence-ministry-seeks-20-capex-hike-for-fy27",
-            "https://www.ibef.org/industry/defence-manufacturing",
-        ],
+        "source_urls": ["https://www.indiabudget.gov.in/", "https://www.ibef.org/industry/defence-manufacturing"],
     },
-    # Add "Semiconductors", "Green Hydrogen", "Pharma", etc. using the same schema.
+    "Semiconductors": {
+        "aliases": ["chips", "chipmaking", "semis", "fabs", "silicon"],
+        "last_reviewed": "2026-11-26", "verified": False,
+        "global_universe": [
+            {"name": "NVIDIA", "ticker": "NVDA", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 4500, "thesis": "AI accelerators and networking"},
+            {"name": "TSMC", "ticker": "TSM", "country": "TW", "flag": "🇹🇼", "market_cap_usd_bn": 1500, "thesis": "Leading-edge foundry capacity"},
+            {"name": "ASML", "ticker": "ASML", "country": "NL", "flag": "🇳🇱", "market_cap_usd_bn": 450, "thesis": "Lithography equipment bottleneck"},
+            {"name": "Broadcom", "ticker": "AVGO", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 1300, "thesis": "Custom silicon and networking"},
+            {"name": "AMD", "ticker": "AMD", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 350, "thesis": "CPU and AI accelerator competition"},
+            {"name": "Samsung Electronics", "ticker": "005930.KS", "country": "KR", "flag": "🇰🇷", "market_cap_usd_bn": 350, "thesis": "Memory, foundry and device ecosystem"},
+        ],
+        "india_direct": [
+            {"name": "Tata Elxsi", "ticker": "TATAELXSI.NS", "link": "Listed engineering proxy", "reason": "Tata Electronics is unlisted; Tata Elxsi is a separate listed engineering company"},
+            {"name": "CG Power", "ticker": "CGPOWER.NS", "link": "OSAT / semiconductor JV", "reason": "Semiconductor packaging and test ecosystem investment"},
+            {"name": "Kaynes Technology", "ticker": "KAYNES.NS", "link": "EMS / OSAT", "reason": "Electronics manufacturing and semiconductor packaging plans"},
+            {"name": "SPEL Semiconductor", "ticker": "SPEL.NS", "link": "Packaging and assembly", "reason": "Indian semiconductor assembly and packaging exposure"},
+            {"name": "MosChip Technologies", "ticker": "MOSCHIP.NS", "link": "Design services", "reason": "Semiconductor design and engineering services"},
+        ],
+        "india_indirect": [
+            {"name": "HCL Technologies", "ticker": "HCLTECH.NS", "link_type": "Chip design services", "reason": "Engineering and semiconductor design capabilities"},
+            {"name": "Tata Elxsi", "ticker": "TATAELXSI.NS", "link_type": "Embedded/automotive design", "reason": "Embedded software and silicon-adjacent engineering"},
+            {"name": "L&T", "ticker": "LT.NS", "link_type": "Infrastructure and engineering", "reason": "Industrial construction and technology project execution"},
+            {"name": "Dixon Technologies", "ticker": "DIXON.NS", "link_type": "Electronics manufacturing", "reason": "Device assembly demand and electronics supply chain"},
+        ],
+        "policy_kpis": [
+            {"label": "India Semiconductor Mission", "value": "₹76,000 Cr incentive envelope", "as_of": "Program announced; verify utilization"},
+            {"label": "Approved projects", "value": "Multiple fab / ATMP projects", "as_of": "Nov 2026; project status verify"},
+            {"label": "Global AI chip demand", "value": "Structural growth; cycle-sensitive", "as_of": "Nov 2026 estimate"},
+            {"label": "India import dependence", "value": "High in advanced chips", "as_of": "Industry overview; verify"},
+        ],
+        "policy_timeline": [
+            {"year": 2021, "event": "India Semiconductor Mission and incentive framework announced"},
+            {"year": 2022, "event": "Design-linked incentive and ecosystem programs progressed"},
+            {"year": 2023, "event": "Semiconductor project approvals and ecosystem commitments"},
+            {"year": 2024, "event": "Additional fab and ATMP project approvals announced"},
+            {"year": 2026, "event": "Construction, commissioning and yield milestones are key monitorables"},
+        ],
+        "risks": [
+            {"risk": "Fab / OSAT execution delays", "likelihood": 4, "impact": 5, "category": "Execution"},
+            {"risk": "Semiconductor inventory cycle downturn", "likelihood": 3, "impact": 4, "category": "Cycle"},
+            {"risk": "Technology and talent gaps", "likelihood": 3, "impact": 4, "category": "Technology"},
+            {"risk": "High capital intensity / funding risk", "likelihood": 4, "impact": 5, "category": "Finance"},
+            {"risk": "Export controls and geopolitical disruption", "likelihood": 3, "impact": 5, "category": "Geopolitical"},
+        ],
+        "watchlist": [
+            {"metric": "Project commissioning milestones", "current": "Project-specific; verify", "threshold": "Delay >2 quarters", "source": "Company / ISM announcements", "frequency": "Quarterly"},
+            {"metric": "OSAT utilization and customer wins", "current": "Company disclosures", "threshold": "Utilization below 60% after ramp", "source": "Company filings", "frequency": "Quarterly"},
+            {"metric": "DLI design wins", "current": "Latest disclosed count", "threshold": "Slower design-win conversion", "source": "MeitY / ISM", "frequency": "Quarterly"},
+            {"metric": "Capex funding and cash flow", "current": "Project disclosures", "threshold": "Funding gap or cost overrun", "source": "Company filings", "frequency": "Quarterly"},
+        ],
+        "source_urls": ["https://www.meity.gov.in/", "https://www.semiconductors.org/"],
+    },
+    "Data Centers": {
+        "aliases": ["datacenter", "cloud infrastructure", "hyperscale", "colocation", "ai compute"],
+        "last_reviewed": "2026-11-26", "verified": False,
+        "global_universe": [
+            {"name": "Equinix", "ticker": "EQIX", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 90, "thesis": "Global colocation and interconnection"},
+            {"name": "Digital Realty", "ticker": "DLR", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 65, "thesis": "Hyperscale and enterprise data centers"},
+            {"name": "Vertiv", "ticker": "VRT", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 100, "thesis": "Power and cooling infrastructure"},
+            {"name": "Schneider Electric", "ticker": "SU.PA", "country": "FR", "flag": "🇫🇷", "market_cap_usd_bn": 150, "thesis": "Electrical distribution and data-center efficiency"},
+            {"name": "NVIDIA", "ticker": "NVDA", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 4500, "thesis": "AI compute platform demand"},
+            {"name": "Microsoft", "ticker": "MSFT", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 4000, "thesis": "Cloud and AI infrastructure capex"},
+        ],
+        "india_direct": [
+            {"name": "Anant Raj", "ticker": "ANANTRAJ.NS", "link": "Data-center development", "reason": "Developing data-center infrastructure and capacity"},
+            {"name": "Netweb Technologies", "ticker": "NETWEB.NS", "link": "Servers / HPC", "reason": "High-performance computing and AI server systems"},
+            {"name": "Tata Communications", "ticker": "TATACOMM.NS", "link": "Connectivity / cloud", "reason": "Network, cloud and data-center services ecosystem"},
+            {"name": "Techno Electric", "ticker": "TECHNOE.NS", "link": "Data-center projects", "reason": "Power infrastructure and data-center project exposure"},
+        ],
+        "india_indirect": [
+            {"name": "Larsen & Toubro", "ticker": "LT.NS", "link_type": "EPC and power systems", "reason": "Construction and electrical infrastructure for facilities"},
+            {"name": "KEI Industries", "ticker": "KEI.NS", "link_type": "Cables", "reason": "Power and connectivity cable demand"},
+            {"name": "Cummins India", "ticker": "CUMMINSIND.NS", "link_type": "Backup power", "reason": "Generator and power reliability systems"},
+            {"name": "Blue Star", "ticker": "BLUESTARCO.NS", "link_type": "Cooling / HVAC", "reason": "Cooling systems and HVAC infrastructure"},
+        ],
+        "policy_kpis": [
+            {"label": "India data-center capacity", "value": "Multi-GW pipeline; verify", "as_of": "Nov 2026 estimate"},
+            {"label": "AI / cloud demand", "value": "Strong structural driver", "as_of": "Industry outlook; verify"},
+            {"label": "Power availability", "value": "Location-specific constraint", "as_of": "Current project diligence"},
+            {"label": "Renewable procurement", "value": "Growing priority", "as_of": "Industry trend; verify"},
+        ],
+        "policy_timeline": [
+            {"year": 2020, "event": "Cloud adoption and digital infrastructure investment accelerated"},
+            {"year": 2022, "event": "Data-center policies expanded across Indian states"},
+            {"year": 2023, "event": "AI workloads increased demand for high-density compute"},
+            {"year": 2024, "event": "Hyperscaler and domestic operator capacity announcements grew"},
+            {"year": 2026, "event": "Power, land, connectivity and utilization determine project economics"},
+        ],
+        "risks": [
+            {"risk": "Grid and power procurement constraints", "likelihood": 4, "impact": 5, "category": "Infrastructure"},
+            {"risk": "Capex overrun and commissioning delays", "likelihood": 3, "impact": 4, "category": "Execution"},
+            {"risk": "Utilization ramp slower than expected", "likelihood": 3, "impact": 4, "category": "Demand"},
+            {"risk": "Cooling / water / environmental constraints", "likelihood": 3, "impact": 4, "category": "Sustainability"},
+            {"risk": "Valuation and customer concentration", "likelihood": 3, "impact": 4, "category": "Valuation"},
+        ],
+        "watchlist": [
+            {"metric": "Capacity commissioned", "current": "Operator-reported; verify", "threshold": "Commissioning slips >2 quarters", "source": "Operator / company filings", "frequency": "Quarterly"},
+            {"metric": "Utilization / contracted capacity", "current": "Not consistently disclosed", "threshold": "Ramp below plan", "source": "Company filings", "frequency": "Quarterly"},
+            {"metric": "Power cost and availability", "current": "Site-specific", "threshold": "Power cost materially above underwriting", "source": "Operator / state utilities", "frequency": "Quarterly"},
+            {"metric": "Net debt and capex", "current": "Company reported", "threshold": "Debt rises faster than contracted capacity", "source": "Company filings", "frequency": "Quarterly"},
+        ],
+        "source_urls": ["https://www.meity.gov.in/", "https://www.datacenterdynamics.com/"],
+    },
+    "Pharma & CDMO": {
+        "aliases": ["pharmaceuticals", "drug makers", "cdmo", "contract manufacturing", "api"],
+        "last_reviewed": "2026-11-26", "verified": False,
+        "global_universe": [
+            {"name": "Eli Lilly", "ticker": "LLY", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 900, "thesis": "Metabolic and specialty medicines"},
+            {"name": "Novo Nordisk", "ticker": "NVO", "country": "DK", "flag": "🇩🇰", "market_cap_usd_bn": 400, "thesis": "GLP-1 and diabetes franchise"},
+            {"name": "Lonza", "ticker": "LONN.SW", "country": "CH", "flag": "🇨🇭", "market_cap_usd_bn": 60, "thesis": "Biologics and contract development manufacturing"},
+            {"name": "Merck", "ticker": "MRK", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 250, "thesis": "Oncology and pharmaceutical pipeline"},
+            {"name": "Thermo Fisher", "ticker": "TMO", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 200, "thesis": "Life-science tools and services"},
+            {"name": "WuXi Biologics", "ticker": "2269.HK", "country": "HK", "flag": "🇭🇰", "market_cap_usd_bn": 25, "thesis": "Biologics CDMO scale and services"},
+        ],
+        "india_direct": [
+            {"name": "Syngene International", "ticker": "SYNGENE.NS", "link": "CRDMO", "reason": "Research, development and manufacturing services"},
+            {"name": "Divi's Laboratories", "ticker": "DIVISLAB.NS", "link": "API / custom synthesis", "reason": "Custom synthesis and API production"},
+            {"name": "Sai Life Sciences", "ticker": "SAILIFE.NS", "link": "CRDMO", "reason": "Discovery, development and manufacturing services"},
+            {"name": "Cipla", "ticker": "CIPLA.NS", "link": "Pharma", "reason": "Respiratory and complex generics portfolio"},
+            {"name": "Dr. Reddy's Laboratories", "ticker": "DRREDDY.NS", "link": "Pharma", "reason": "Generics, APIs and specialty products"},
+        ],
+        "india_indirect": [
+            {"name": "Laurus Labs", "ticker": "LAURUSLABS.NS", "link_type": "API / CDMO", "reason": "API, formulation and development manufacturing"},
+            {"name": "Cohance Lifesciences", "ticker": "COHANCE.NS", "link_type": "Specialty ingredients", "reason": "Pharma and specialty ingredient manufacturing"},
+            {"name": "Gland Pharma", "ticker": "GLAND.NS", "link_type": "Injectables", "reason": "Sterile injectable manufacturing scale"},
+            {"name": "Aurobindo Pharma", "ticker": "AUROPHARMA.NS", "link_type": "Generics / API", "reason": "Vertical integration and global generic supply"},
+        ],
+        "policy_kpis": [
+            {"label": "Indian pharma exports", "value": "~$27B annual scale", "as_of": "Recent FY benchmark; verify"},
+            {"label": "PLI pharma scheme", "value": "₹15,000 Cr outlay", "as_of": "Scheme allocation; verify"},
+            {"label": "CDMO demand", "value": "Outsourcing / China+1", "as_of": "Industry trend"},
+            {"label": "Quality compliance", "value": "USFDA / EU GMP critical", "as_of": "Ongoing inspections"},
+        ],
+        "policy_timeline": [
+            {"year": 2020, "event": "Pharma PLI schemes announced for domestic manufacturing"},
+            {"year": 2021, "event": "PLI implementation and eligible product investments progressed"},
+            {"year": 2022, "event": "Global supply-chain diversification boosted outsourcing interest"},
+            {"year": 2024, "event": "Quality upgrades and specialty manufacturing remained sector focus"},
+            {"year": 2026, "event": "CDMO capacity utilization, customer wins and compliance are key"},
+        ],
+        "risks": [
+            {"risk": "Regulatory warning letters / observations", "likelihood": 3, "impact": 5, "category": "Regulatory"},
+            {"risk": "Customer program cancellations", "likelihood": 3, "impact": 4, "category": "Demand"},
+            {"risk": "Pricing pressure in generics", "likelihood": 4, "impact": 3, "category": "Competition"},
+            {"risk": "R&D and facility ramp underperformance", "likelihood": 3, "impact": 4, "category": "Execution"},
+            {"risk": "Currency and export-market exposure", "likelihood": 3, "impact": 3, "category": "Macro"},
+        ],
+        "watchlist": [
+            {"metric": "CDMO order book / client wins", "current": "Company disclosure", "threshold": "Two quarters of weak growth", "source": "Company filings / calls", "frequency": "Quarterly"},
+            {"metric": "Facility utilization", "current": "Company reported", "threshold": "Below 65% at mature facilities", "source": "Company filings", "frequency": "Quarterly"},
+            {"metric": "Regulatory inspections", "current": "Inspection status varies", "threshold": "Major warning / import restriction", "source": "USFDA / regulators", "frequency": "Event-driven"},
+            {"metric": "Export revenue and margins", "current": "Company reported", "threshold": "Margin contraction >300 bps", "source": "Company filings", "frequency": "Quarterly"},
+        ],
+        "source_urls": ["https://www.pharmaceuticals.gov.in/", "https://www.ibef.org/industry/pharmaceutical-india"],
+    },
+    "Power & Energy Transition": {
+        "aliases": ["renewables", "solar", "wind", "grid", "energy transition"],
+        "last_reviewed": "2026-11-26", "verified": False,
+        "global_universe": [
+            {"name": "NextEra Energy", "ticker": "NEE", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 150, "thesis": "Renewable generation and regulated utility"},
+            {"name": "GE Vernova", "ticker": "GEV", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 120, "thesis": "Grid, wind and power equipment"},
+            {"name": "Siemens Energy", "ticker": "ENR.DE", "country": "DE", "flag": "🇩🇪", "market_cap_usd_bn": 80, "thesis": "Grid technology and generation systems"},
+            {"name": "Enphase Energy", "ticker": "ENPH", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 15, "thesis": "Solar inverter and energy management"},
+            {"name": "Iberdrola", "ticker": "IBE.MC", "country": "ES", "flag": "🇪🇸", "market_cap_usd_bn": 100, "thesis": "Renewables and regulated networks"},
+            {"name": "BYD", "ticker": "1211.HK", "country": "CN", "flag": "🇨🇳", "market_cap_usd_bn": 120, "thesis": "EVs, batteries and electrification"},
+        ],
+        "india_direct": [
+            {"name": "Adani Green Energy", "ticker": "ADANIGREEN.NS", "link": "Renewable generation", "reason": "Utility-scale solar, wind and hybrid projects"},
+            {"name": "NTPC", "ticker": "NTPC.NS", "link": "Power generation / renewables", "reason": "Large power base and renewable capacity expansion"},
+            {"name": "Tata Power", "ticker": "TATAPOWER.NS", "link": "Integrated power / solar", "reason": "Renewables, distribution, solar and charging"},
+            {"name": "Suzlon Energy", "ticker": "SUZLON.NS", "link": "Wind equipment", "reason": "Wind turbine manufacturing and service"},
+            {"name": "JSW Energy", "ticker": "JSWENERGY.NS", "link": "Power / storage", "reason": "Generation, renewables and storage pipeline"},
+        ],
+        "india_indirect": [
+            {"name": "Power Grid Corporation", "ticker": "POWERGRID.NS", "link_type": "Transmission", "reason": "Grid transmission capex and renewable integration"},
+            {"name": "BHEL", "ticker": "BHEL.NS", "link_type": "Power equipment", "reason": "Generation equipment and grid-related engineering"},
+            {"name": "Waaree Energies", "ticker": "WAAREEENER.NS", "link_type": "Solar modules", "reason": "Solar module manufacturing and supply chain"},
+            {"name": "INOX Wind", "ticker": "INOXWIND.NS", "link_type": "Wind equipment", "reason": "Wind turbine supply, installation and service"},
+        ],
+        "policy_kpis": [
+            {"label": "Renewable capacity target", "value": "500 GW non-fossil by 2030", "as_of": "National target; verify progress"},
+            {"label": "Solar capacity additions", "value": "Annual record additions expected", "as_of": "2026 estimate; verify"},
+            {"label": "Grid capex", "value": "Multi-year expansion", "as_of": "Plan / project pipeline"},
+            {"label": "Storage requirement", "value": "Growing with renewables", "as_of": "Industry outlook"},
+        ],
+        "policy_timeline": [
+            {"year": 2015, "event": "Renewable energy targets and solar mission expanded"},
+            {"year": 2021, "event": "Updated climate and non-fossil capacity commitments"},
+            {"year": 2022, "event": "Green hydrogen mission and transition programs advanced"},
+            {"year": 2023, "event": "Renewable bidding and transmission expansion continued"},
+            {"year": 2026, "event": "Grid, storage, execution and power offtake shape returns"},
+        ],
+        "risks": [
+            {"risk": "Grid curtailment and transmission bottlenecks", "likelihood": 3, "impact": 4, "category": "Infrastructure"},
+            {"risk": "Tariff / tender changes", "likelihood": 3, "impact": 4, "category": "Policy"},
+            {"risk": "High interest rates and project financing", "likelihood": 3, "impact": 5, "category": "Finance"},
+            {"risk": "Equipment pricing and supply-chain pressure", "likelihood": 3, "impact": 3, "category": "Competition"},
+            {"risk": "Weather and resource variability", "likelihood": 3, "impact": 3, "category": "Operating"},
+        ],
+        "watchlist": [
+            {"metric": "Renewable capacity commissioning", "current": "Latest MNRE data—verify", "threshold": "Commissioning below plan by >10%", "source": "MNRE / company filings", "frequency": "Monthly / quarterly"},
+            {"metric": "Order book and tender wins", "current": "Company disclosed", "threshold": "Order inflow below revenue", "source": "Company filings", "frequency": "Quarterly"},
+            {"metric": "Receivables / payment cycle", "current": "Company reported", "threshold": "Receivable days rise materially", "source": "Company filings", "frequency": "Quarterly"},
+            {"metric": "Debt and project returns", "current": "Company reported", "threshold": "Net debt/EBITDA exceeds plan", "source": "Company filings", "frequency": "Quarterly"},
+        ],
+        "source_urls": ["https://mnre.gov.in/", "https://www.cea.nic.in/"],
+    },
+    "Capital Markets & Financials": {
+        "aliases": ["banks", "financial services", "broking", "insurance", "capital markets"],
+        "last_reviewed": "2026-11-26", "verified": False,
+        "global_universe": [
+            {"name": "JPMorgan Chase", "ticker": "JPM", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 800, "thesis": "Universal banking and capital markets"},
+            {"name": "Goldman Sachs", "ticker": "GS", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 200, "thesis": "Investment banking and trading"},
+            {"name": "BlackRock", "ticker": "BLK", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 150, "thesis": "Asset management and ETF flows"},
+            {"name": "Visa", "ticker": "V", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 700, "thesis": "Payments network and transaction growth"},
+            {"name": "London Stock Exchange Group", "ticker": "LSEG.L", "country": "UK", "flag": "🇬🇧", "market_cap_usd_bn": 60, "thesis": "Market data, analytics and exchange services"},
+            {"name": "CME Group", "ticker": "CME", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 100, "thesis": "Derivatives and clearing"},
+        ],
+        "india_direct": [
+            {"name": "BSE", "ticker": "BSE.NS", "link": "Exchange", "reason": "Cash, derivatives and listing activity"},
+            {"name": "NSE (unlisted proxy: N/A)", "ticker": "BSE.NS", "link": "Listed exchange proxy", "reason": "NSE is unlisted; BSE provides listed exchange exposure"},
+            {"name": "Angel One", "ticker": "ANGELONE.NS", "link": "Retail broking", "reason": "Active retail participation and trading volumes"},
+            {"name": "ICICI Securities (delisted; use ICICI Bank)", "ticker": "ICICIBANK.NS", "link": "Bank / financial services proxy", "reason": "ICICI Securities delisted; bank group proxy used"},
+            {"name": "HDFC Bank", "ticker": "HDFCBANK.NS", "link": "Banking", "reason": "Deposit franchise, credit growth and financial ecosystem"},
+        ],
+        "india_indirect": [
+            {"name": "CAMS", "ticker": "CAMS.NS", "link_type": "Mutual fund services", "reason": "Asset servicing and fund industry infrastructure"},
+            {"name": "KFin Technologies", "ticker": "KFINTECH.NS", "link_type": "Registrar / fund services", "reason": "Issuer, mutual fund and investor servicing"},
+            {"name": "CDSL", "ticker": "CDSL.NS", "link_type": "Depository", "reason": "Demat accounts and securities settlement ecosystem"},
+            {"name": "CRISIL", "ticker": "CRISIL.NS", "link_type": "Ratings / analytics", "reason": "Credit ratings, research and analytics"},
+        ],
+        "policy_kpis": [
+            {"label": "Demat accounts", "value": "Record scale; latest figure verify", "as_of": "2026 estimate"},
+            {"label": "Mutual fund AUM", "value": "Large and growing base; verify", "as_of": "Latest AMFI data"},
+            {"label": "Exchange turnover", "value": "Cycle-dependent", "as_of": "Latest exchange data"},
+            {"label": "Bank credit growth", "value": "Monitor against deposits", "as_of": "Latest RBI data"},
+        ],
+        "policy_timeline": [
+            {"year": 2020, "event": "Digital finance and market participation accelerated"},
+            {"year": 2021, "event": "Retail accounts and market activity expanded"},
+            {"year": 2022, "event": "RBI digital payments and regulatory framework evolved"},
+            {"year": 2024, "event": "Market infrastructure, investor protection and derivatives rules updated"},
+            {"year": 2026, "event": "Turnover, AUM, credit, fee yields and regulation drive sector outlook"},
+        ],
+        "risks": [
+            {"risk": "Trading activity normalizes after high volumes", "likelihood": 4, "impact": 4, "category": "Cycle"},
+            {"risk": "Regulatory restrictions on derivatives / fees", "likelihood": 3, "impact": 4, "category": "Regulatory"},
+            {"risk": "Credit stress and asset quality deterioration", "likelihood": 3, "impact": 5, "category": "Credit"},
+            {"risk": "Deposit competition and margin compression", "likelihood": 4, "impact": 4, "category": "Banking"},
+            {"risk": "Market drawdown reduces AUM and flows", "likelihood": 3, "impact": 4, "category": "Market"},
+        ],
+        "watchlist": [
+            {"metric": "Exchange turnover / volumes", "current": "Latest exchange data—verify", "threshold": "3-month average falls >20% YoY", "source": "BSE / NSE", "frequency": "Monthly"},
+            {"metric": "Mutual fund net flows and AUM", "current": "AMFI monthly report", "threshold": "Two months of net outflows", "source": "AMFI", "frequency": "Monthly"},
+            {"metric": "Bank NIM and credit growth", "current": "Quarterly disclosures", "threshold": "NIM down >50 bps or credit quality weakens", "source": "Bank filings / RBI", "frequency": "Quarterly"},
+            {"metric": "Regulatory actions", "current": "Monitor circulars", "threshold": "Material restriction on core revenue", "source": "SEBI / RBI", "frequency": "Event-driven"},
+        ],
+        "source_urls": ["https://www.sebi.gov.in/", "https://www.amfiindia.com/"],
+    },
+    "Manufacturing & Import Substitution": {
+        "aliases": ["make in india", "local manufacturing", "p li", "indigenisation", "import substitution"],
+        "last_reviewed": "2026-11-26", "verified": False,
+        "global_universe": [
+            {"name": "Siemens", "ticker": "SIE.DE", "country": "DE", "flag": "🇩🇪", "market_cap_usd_bn": 200, "thesis": "Industrial automation and electrification"},
+            {"name": "Honeywell", "ticker": "HON", "country": "US", "flag": "🇺🇸", "market_cap_usd_bn": 150, "thesis": "Automation, aerospace and industrial systems"},
+            {"name": "Schneider Electric", "ticker": "SU.PA", "country": "FR", "flag": "🇫🇷", "market_cap_usd_bn": 150, "thesis": "Automation and energy management"},
+            {"name": "ABB", "ticker": "ABB", "country": "CH", "flag": "🇨🇭", "market_cap_usd_bn": 120, "thesis": "Robotics, electrification and automation"},
+            {"name": "CATL", "ticker": "300750.SZ", "country": "CN", "flag": "🇨🇳", "market_cap_usd_bn": 150, "thesis": "Battery manufacturing scale"},
+            {"name": "Toyota", "ticker": "7203.T", "country": "JP", "flag": "🇯🇵", "market_cap_usd_bn": 300, "thesis": "Automotive manufacturing and supply chain"},
+        ],
+        "india_direct": [
+            {"name": "Bharat Forge", "ticker": "BHARATFORG.NS", "link": "Forging / engineering", "reason": "Precision forgings and industrial / mobility components"},
+            {"name": "Dixon Technologies", "ticker": "DIXON.NS", "link": "Electronics manufacturing", "reason": "EMS scale, customer programs and localization"},
+            {"name": "Kaynes Technology", "ticker": "KAYNES.NS", "link": "EMS / advanced manufacturing", "reason": "Electronics manufacturing and higher-value systems"},
+            {"name": "Amber Enterprises", "ticker": "AMBER.NS", "link": "Components / electronics", "reason": "AC components and electronics manufacturing"},
+            {"name": "Hindustan Zinc", "ticker": "HINDZINC.NS", "link": "Domestic metals supply", "reason": "Domestic zinc and silver production / import replacement"},
+        ],
+        "india_indirect": [
+            {"name": "Larsen & Toubro", "ticker": "LT.NS", "link_type": "Industrial EPC", "reason": "Factories, infrastructure and industrial project execution"},
+            {"name": "Cummins India", "ticker": "CUMMINSIND.NS", "link_type": "Power equipment", "reason": "Engine and power systems manufacturing"},
+            {"name": "Polycab India", "ticker": "POLYCAB.NS", "link_type": "Electrical products", "reason": "Cables and wires for industrial capex"},
+            {"name": "Motherson", "ticker": "MOTHERSON.NS", "link_type": "Auto components", "reason": "Globalized automotive component manufacturing footprint"},
+        ],
+        "policy_kpis": [
+            {"label": "Manufacturing share of GDP", "value": "Target ~25%; current below target", "as_of": "Policy ambition; verify"},
+            {"label": "PLI schemes", "value": "Multiple sectors / schemes", "as_of": "Scheme status varies"},
+            {"label": "Electronics exports", "value": "Growing rapidly; verify latest", "as_of": "FY26/FY27 estimate"},
+            {"label": "Import dependence", "value": "Sector-specific; monitor", "as_of": "Trade data"},
+        ],
+        "policy_timeline": [
+            {"year": 2014, "event": "Make in India initiative launched"},
+            {"year": 2020, "event": "Production-linked incentive schemes introduced across sectors"},
+            {"year": 2021, "event": "PLI programs and domestic manufacturing incentives expanded"},
+            {"year": 2023, "event": "Electronics, mobility and industrial supply-chain investments grew"},
+            {"year": 2026, "event": "Localization, export competitiveness and execution remain key measures"},
+        ],
+        "risks": [
+            {"risk": "Policy incentives change or lapse", "likelihood": 3, "impact": 4, "category": "Policy"},
+            {"risk": "Imported input dependence persists", "likelihood": 4, "impact": 4, "category": "Supply chain"},
+            {"risk": "Low margins / intense EMS competition", "likelihood": 4, "impact": 4, "category": "Competition"},
+            {"risk": "Customer concentration and program volatility", "likelihood": 3, "impact": 4, "category": "Demand"},
+            {"risk": "Capex and working-capital strain", "likelihood": 3, "impact": 5, "category": "Finance"},
+        ],
+        "watchlist": [
+            {"metric": "Domestic value-add / localization", "current": "Company and sector disclosures", "threshold": "Localization progress stalls", "source": "Company filings / industry bodies", "frequency": "Annual / quarterly"},
+            {"metric": "PLI incentive receipts", "current": "Scheme-specific disclosures", "threshold": "Eligibility or payout delay", "source": "Ministry / company filings", "frequency": "Quarterly"},
+            {"metric": "Order book and capacity utilization", "current": "Company reported", "threshold": "Utilization below 65% or order weakness", "source": "Company filings", "frequency": "Quarterly"},
+            {"metric": "Working capital / cash conversion", "current": "Company reported", "threshold": "Receivable days increase >20% YoY", "source": "Company filings", "frequency": "Quarterly"},
+        ],
+        "source_urls": ["https://www.makeinindia.com/", "https://www.investindia.gov.in/"],
+    },
 }
 
 # ============================================================
@@ -614,84 +904,6 @@ def render_theme_briefing(theme_key):
     render_risk_watchlist(theme)
 
 
-# ============================================================
-# THEME SEARCH FALLBACK
-# ============================================================
-def fuzzy_match(query, themes):
-    lower_map = {}
-    for k, t in themes.items():
-        lower_map[k.lower()] = k
-        for alias in t.get("aliases", []):
-            lower_map[alias.lower()] = k
-    matches = difflib.get_close_matches(query.lower(), list(lower_map.keys()),
-                                        n=1, cutoff=0.6)
-    if matches:
-        return lower_map[matches[0]]
-    return None
-
-
-def search_universe(query):
-    """Resolve a free-text query to a list of equity/ETF tickers."""
-    tickers = []
-    seen = set()
-    try:
-        search = yf.Search(query, max_results=30)
-        for q in search.quotes:
-            sym = q.get("symbol", "")
-            qtype = q.get("quoteType", "")
-            if not sym or sym in seen:
-                continue
-            if qtype not in ("EQUITY", "ETF", "MUTUALFUND"):
-                continue
-            seen.add(sym)
-            tickers.append(sym)
-    except Exception:
-        pass
-    return tickers[:15]
-
-
-def render_auto_briefing(query):
-    st.warning(f"⚠️ '{query}' is not in the curated registry. Showing quantitative-only view.")
-    st.caption("Policy, direct/indirect rationale, and risk text are unavailable for uncurated topics. "
-               "Add this theme to THEMES to unlock the full briefing.")
-
-    tickers = search_universe(query)
-    if not tickers:
-        st.error("Could not resolve any tickers. Try a more specific keyword "
-                 "(e.g., 'cybersecurity', 'quantum computing', 'space').")
-        return
-
-    st.markdown(f"**Resolved {len(tickers)} tickers:** "
-                f"{', '.join(tickers[:10])}{'...' if len(tickers) > 10 else ''}")
-    prices = batch_prices(tuple(tickers), period="1y")
-    if not prices:
-        st.error("No price data returned for the resolved tickers.")
-        return
-
-    rets_3m = [compute_momentum(df["Close"], 63) for df in prices.values() if len(df) > 63]
-    rets_3m = [r for r in rets_3m if pd.notna(r)]
-    above_200, valid_200 = 0, 0
-    for df in prices.values():
-        if len(df) >= 200:
-            valid_200 += 1
-            ma200 = df["Close"].rolling(200).mean().iloc[-1]
-            if pd.notna(ma200) and df["Close"].iloc[-1] > ma200:
-                above_200 += 1
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Momentum (3M avg)", f"{np.mean(rets_3m):+.1f}%" if rets_3m else "—")
-    c2.metric("Breadth (>200DMA)", f"{above_200/valid_200*100:.0f}%" if valid_200 else "—")
-    c3.metric("Tickers resolved", len(prices))
-
-    closes = pd.DataFrame({t: prices[t]["Close"] for t in prices}).dropna()
-    if len(closes.columns) >= 3 and len(closes) > 30:
-        corr = closes.pct_change().corr()
-        fig = px.imshow(corr, color_continuous_scale="RdYlGn", zmin=-1, zmax=1,
-                        title="Return correlation (1Y)")
-        fig.update_layout(template="plotly_dark", height=500)
-        st.plotly_chart(fig, use_container_width=True)
-
-
 # ==========================================
 # HELPERS FOR PORTFOLIO BUILDER
 # ==========================================
@@ -983,7 +1195,7 @@ if ("df" in st.session_state and not st.session_state.df.empty):
     c3.metric("Bearish Stocks", int((df["Trend"] == "🔴 Down").sum()))
     c4.metric("Volume Spikes", int((df["Vol"] == "🚨 SPIKE").sum()))
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_hot, tab_search = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_hot = st.tabs([
         "📉 Sensex",
         "🏆 Top 10",
         "📊 Scanner",
@@ -992,7 +1204,6 @@ if ("df" in st.session_state and not st.session_state.df.empty):
         "📈 Buy/Sell",
         "💼 Portfolio Builder",
         "🔥 Hot Themes",
-        "🔍 Theme Search",
     ])
 
     # SENSEX
@@ -1465,26 +1676,6 @@ if ("df" in st.session_state and not st.session_state.df.empty):
                 render_theme_briefing(choice)
             else:
                 st.info("👆 Click a pill above to load the full briefing.")
-
-    # ============================================================
-    # NEW TAB: 🔍 THEME SEARCH
-    # ============================================================
-    with tab_search:
-        st.subheader("🔍 Theme Search — Any Topic")
-        query = st.text_input(
-            "Enter any theme or keyword",
-            placeholder="e.g. Quantum Computing, Cybersecurity, Space",
-        )
-        if query:
-            matched = fuzzy_match(query, THEMES)
-            if matched:
-                st.success(f"Matched curated theme: **{matched}**")
-                render_theme_briefing(matched)
-            else:
-                render_auto_briefing(query)
-        else:
-            st.info("Type a theme above. Curated themes get the full 6-view briefing; "
-                    "uncurated themes get a quantitative-only view.")
 
 else:
     st.info("Click the button above to download market data and build your scanner.")
