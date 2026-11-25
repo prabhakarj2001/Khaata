@@ -934,212 +934,654 @@ if (
                 mime="text/csv"
             )
 
+   
     # --- TAB 7: PORTFOLIO BUILDER ---
     with tab7:
         st.subheader("💼 Portfolio Builder")
-        st.caption("Not investment advice. This is a quantitative allocation tool.")
-        
+        st.caption("I'm not a financial advisor. This is a quantitative allocation model, not a return guarantee.")
+
         col_in1, col_in2, col_in3 = st.columns(3)
+
         with col_in1:
-            inv_amount = st.number_input("Investment Amount (₹)", min_value=25000, value=500000, step=25000, key="pb_amount")
+            inv_amount = st.number_input(
+                "Investment Amount (₹)",
+                min_value=1000,
+                value=40000,
+                step=1000,
+                key="pb_amount"
+            )
+
         with col_in2:
-            horizon = st.select_slider("Horizon", options=["Under 6 months", "6-24 months", "3+ years"], value="6-24 months", key="pb_horizon")
+            horizon = st.select_slider(
+                "Investment Horizon",
+                options=["Under 6 months", "6-24 months", "3+ years"],
+                value="6-24 months",
+                key="pb_horizon"
+            )
+
         with col_in3:
-            risk = st.slider("Risk Tolerance (1-10)", 1, 10, 5, key="pb_risk")
-            risk_label = "Averse" if risk <= 3 else ("Balanced" if risk <= 7 else "Aggressive")
+            risk = st.slider(
+                "Risk Tolerance (1-10)",
+                1, 10, 5,
+                key="pb_risk"
+            )
+            risk_label = (
+                "Conservative" if risk <= 3
+                else "Balanced" if risk <= 7
+                else "Aggressive"
+            )
             st.write(f"Profile: **{risk_label}**")
 
         if st.button("Build Portfolio", key="pb_build_btn"):
+
             try:
-                num_pos = int(interpolate(risk, 18, 13, 10))
+                p_data_local = st.session_state.p_data
+
+                num_pos = int(round(interpolate(risk, 18, 13, 10)))
                 max_w = interpolate(risk, 0.07, 0.10, 0.15)
                 max_sec_w = interpolate(risk, 0.20, 0.25, 0.35)
                 vol_cap = interpolate(risk, 0.25, 0.40, 1.0)
                 liq_floor = interpolate(risk, 50, 20, 10)
                 stop_mult = interpolate(risk, 3.0, 2.5, 2.0)
-                cash_buffer = interpolate(risk, 0.10, 0.05, 0.0)
-                
-                if risk <= 3: core_pct = 0.50
-                elif risk <= 7: core_pct = 0.25
-                else: core_pct = interpolate(risk, 0, 0.10, 0)
-                
-                # Gold trend error fix using .squeeze()
-                gold_pct = 0.0
-                try:
-                    gold_df = yf.download("GC=F", period="1y", interval="1d", progress=False)
-                    if not gold_df.empty:
-                        if isinstance(gold_df.columns, pd.MultiIndex): gold_df.columns = gold_df.columns.get_level_values(0)
-                        if len(gold_df) >= 200:
-                            gold_close = gold_df['Close'].squeeze()
-                            gold_sma = gold_close.rolling(200).mean().iloc[-1]
-                            gold_trend_up = bool(gold_close.iloc[-1] > gold_sma)
-                            if gold_trend_up and risk <= 5: gold_pct = 0.10
-                except: pass
-                
-                st.write("**Risk Parameters Applied:**")
-                
-                # FIXED: Separated dataframe creation to avoid bracket errors
-                params_dict = {
-                    "Positions": num_pos, 
-                    "Max Stock %": f"{max_w*100:.1f}%", 
-                    "Max Sector %": f"{max_sec_w*100:.1f}%",
-                    "Vol Cap": "None" if vol_cap >= 1.0 else f"{vol_cap*100:.0f}%", 
-                    "Liq Floor (₹Cr)": f"{liq_floor:.0f}",
-                    "Stop Mult": f"{stop_mult:.1f}x ATR", 
-                    "Cash Buffer": f"{cash_buffer*100:.0f}%", 
-                    "Core ETF": f"{core_pct*100:.0f}%", 
-                    "Gold Sleeve": f"{gold_pct*100:.0f}%"
-                }
-                st.dataframe(pd.DataFrame([params_dict]), hide_index=True)
 
-                # Scoring
+                # A ₹40,000 portfolio should not be forced into 10-18 stocks.
+                # Use a smaller, practical number of holdings for smaller amounts.
+                num_pos = min(
+                    num_pos,
+                    max(3, int(inv_amount // 3000))
+                )
+
+                st.write("### Risk Parameters")
+                st.write(
+                    f"Target holdings: **{num_pos}** | "
+                    f"Maximum stock weight: **{max_w * 100:.1f}%** | "
+                    f"Maximum sector weight: **{max_sec_w * 100:.1f}%**"
+                )
+
+                # ------------------------------------------
+                # STOCK SCORING AND ELIGIBILITY
+                # ------------------------------------------
                 eligible = []
-                p_data_local = st.session_state.p_data
-                
-                for _, row in df.iterrows():
-                    sym = row['Stock']
+
+                for _, market_row in df.iterrows():
+
+                    sym = market_row["Stock"]
                     df_p = p_data_local.get(sym)
-                    if df_p is None or len(df_p) < 252: continue
-                    
-                    vol_1y = df_p['Close'].pct_change().tail(252).std() * np.sqrt(252)
-                    liq_cr = (df_p['Close'] * df_p['Volume']).tail(20).mean() / 10000000
-                    above_200 = bool(row.get('Long Trend') == "🟢 Bullish")
-                    
-                    relax_a = relax_b = relax_c = relax_d = False
-                    
-                    while True:
-                        pass_vol = vol_1y <= vol_cap if not relax_a else vol_1y <= (vol_cap + 0.10)
-                        pass_liq = liq_cr >= liq_floor if not relax_b else liq_cr >= (liq_floor / 2)
-                        pass_rs = row['3M %'] > 0 if not relax_c else True
-                        pass_above200 = above_200 if not relax_d else True
-                        
-                        if pass_vol and pass_liq and pass_rs and pass_above200:
-                            break
-                        if not relax_a: relax_a = True
-                        elif not relax_b: relax_b = True
-                        elif not relax_c: relax_c = True
-                        elif not relax_d: relax_d = True
-                        else: break
-                        
-                    if pass_vol and pass_liq and pass_rs and pass_above200:
-                        score = 0
-                        rsi = ta.momentum.RSIIndicator(df_p['Close'], window=14).rsi().iloc[-1]
-                        
+
+                    if df_p is None or len(df_p) < 252:
+                        continue
+
+                    try:
+                        close = df_p["Close"].astype(float)
+                        high = df_p["High"].astype(float)
+                        low = df_p["Low"].astype(float)
+                        volume = df_p["Volume"].astype(float)
+
+                        price = float(close.iloc[-1])
+
+                        if not np.isfinite(price) or price <= 0:
+                            continue
+
+                        daily_returns = close.pct_change().dropna()
+                        vol_1y = float(
+                            daily_returns.tail(252).std() * np.sqrt(252)
+                        )
+
+                        if not np.isfinite(vol_1y) or vol_1y <= 0:
+                            continue
+
+                        liq_cr = float(
+                            (close * volume).tail(20).mean() / 10000000
+                        )
+
+                        above_200 = (
+                            market_row["Long Trend"] == "🟢 Bullish"
+                        )
+
+                        rsi = float(
+                            ta.momentum.RSIIndicator(
+                                close, window=14
+                            ).rsi().iloc[-1]
+                        )
+
+                        ret_3m = float(market_row["3M %"])
+                        ret_6m = float(market_row["6M %"])
+                        ret_1y = float(market_row["1Y %"])
+                        ret_3y = float(market_row["3Y %"])
+                        ret_5y = float(market_row["5Y %"])
+                        momentum = float(market_row["Momentum"])
+
+                        # Gradually relax filters if a stock fails.
+                        pass_vol = vol_1y <= vol_cap
+                        pass_liq = liq_cr >= liq_floor
+                        pass_rs = ret_3m > 0
+                        pass_trend = above_200
+
+                        if not pass_vol:
+                            pass_vol = vol_1y <= vol_cap + 0.15
+
+                        if not pass_liq:
+                            pass_liq = liq_cr >= liq_floor / 2
+
+                        if not pass_rs:
+                            pass_rs = True
+
+                        if not pass_trend:
+                            pass_trend = True
+
+                        if not (
+                            pass_vol and pass_liq
+                            and pass_rs and pass_trend
+                        ):
+                            continue
+
                         if horizon == "Under 6 months":
-                            pullback = 1 if 30 <= rsi <= 50 and above_200 else 0
-                            score = (0.4 * pullback) + (0.3 * (row['3M %'] / 100)) + (0.3 * (1 if row['Trend'] == "🟢 Up" else 0))
+                            pullback = (
+                                1 if 30 <= rsi <= 50 and above_200 else 0
+                            )
+                            score = (
+                                0.40 * pullback
+                                + 0.30 * (ret_3m / 100)
+                                + 0.30 * (
+                                    1 if market_row["Trend"] == "🟢 Up"
+                                    else 0
+                                )
+                            )
+
                         elif horizon == "6-24 months":
-                            score = (0.5 * (row['Momentum'] / 100)) + (0.25 * (row['6M %'] / 100)) + (0.25 * (1 if row['Trend'] == "🟢 Up" else 0))
+                            score = (
+                                0.50 * (momentum / 100)
+                                + 0.25 * (ret_6m / 100)
+                                + 0.25 * (
+                                    1 if market_row["Trend"] == "🟢 Up"
+                                    else 0
+                                )
+                            )
+
                         else:
-                            consistency = (1 if row['1Y %'] > 0 else 0) + (1 if row['3Y %'] > 0 else 0) + (1 if row['5Y %'] > 0 else 0)
-                            max_dd = calc_max_drawdown(df_p['Close'].pct_change().tail(756))
-                            score = (0.35 * (consistency/3)) + (0.35 * (1 - abs(max_dd))) + (0.30 * (1 - vol_1y))
-                            
-                        low_vol_score = 1 - vol_1y
+                            consistency = (
+                                (1 if ret_1y > 0 else 0)
+                                + (1 if ret_3y > 0 else 0)
+                                + (1 if ret_5y > 0 else 0)
+                            )
+
+                            max_dd = calc_max_drawdown(
+                                daily_returns.tail(756)
+                            )
+
+                            score = (
+                                0.35 * (consistency / 3)
+                                + 0.35 * (1 - abs(max_dd))
+                                + 0.30 * (1 - min(vol_1y, 1))
+                            )
+
+                        low_vol_score = 1 - min(vol_1y, 1)
                         vol_weight = ((10 - risk) / 10) * 0.4
-                        score = (score * (1 - vol_weight)) + (low_vol_score * vol_weight)
-                        if risk >= 8: score += (row['Momentum'] / 100) * 0.2
-                        
+
+                        score = (
+                            score * (1 - vol_weight)
+                            + low_vol_score * vol_weight
+                        )
+
+                        if risk >= 8:
+                            score += (momentum / 100) * 0.2
+
+                        atr = float(
+                            ta.volatility.AverageTrueRange(
+                                high, low, close, window=14
+                            ).average_true_range().iloc[-1]
+                        )
+
+                        if not np.isfinite(atr) or atr <= 0:
+                            continue
+
+                        # IMPORTANT:
+                        # Carry every column needed by the final display.
                         eligible.append({
-                            "Stock": sym, "Sector": row['Sector'], "Price": row['Price'], "Score": score,
-                            "Vol": vol_1y, "Liq": liq_cr, "RSI": rsi, "RS_3M": row['3M %'],
-                            "ATR": ta.volatility.AverageTrueRange(df_p['High'], df_p['Low'], df_p['Close']).average_true_range().iloc[-1]
+                            "Stock": sym,
+                            "Sector": market_row["Sector"],
+                            "Price": price,
+                            "Momentum": momentum,
+                            "3M %": ret_3m,
+                            "6M %": ret_6m,
+                            "1Y %": ret_1y,
+                            "3Y %": ret_3y,
+                            "5Y %": ret_5y,
+                            "Score": float(score),
+                            "Vol": vol_1y,
+                            "Liq": liq_cr,
+                            "RSI": rsi,
+                            "ATR": atr
                         })
-                
-                if len(eligible) < 10:
-                    st.warning("Not enough stocks passed the strict filters. Relaxed filters applied to guarantee at least 10 stocks.")
-                
-                df_elig = pd.DataFrame(eligible).sort_values(by="Score", ascending=False)
-                
-                # Construction
+
+                    except Exception:
+                        continue
+
+                df_elig = pd.DataFrame(eligible)
+
+                if df_elig.empty:
+                    st.error(
+                        "No stocks passed the data and eligibility checks. "
+                        "Run the market scanner again and retry."
+                    )
+                    st.stop()
+
+                df_elig = (
+                    df_elig.replace([np.inf, -np.inf], np.nan)
+                    .dropna(subset=["Score", "Price", "Vol"])
+                    .sort_values("Score", ascending=False)
+                )
+
+                if df_elig.empty:
+                    st.error("No valid stocks available for allocation.")
+                    st.stop()
+
+                # ------------------------------------------
+                # SELECT STOCKS WITH SECTOR DIVERSIFICATION
+                # ------------------------------------------
                 selected = []
                 sector_counts = {}
-                for _, row in df_elig.iterrows():
-                    sec = row['Sector']
-                    if sector_counts.get(sec, 0) < math.floor(max_sec_w * num_pos):
-                        selected.append(row)
-                        sector_counts[sec] = sector_counts.get(sec, 0) + 1
-                    if len(selected) >= num_pos: break
-                
-                df_sel = pd.DataFrame(selected)
-                df_sel['InvVol'] = 1 / df_sel['Vol']
-                df_sel['Weight'] = df_sel['InvVol'] / df_sel['InvVol'].sum()
-                df_sel['Weight'] = cap_weights(df_sel['Weight'].tolist(), max_w)
-                
-                breadth = (df['Long Trend'] == "🟢 Bullish").sum() / len(df) * 100
-                if breadth < 40: cash_buffer += 0.20
-                if breadth < 25: cash_buffer += 0.40
-                cash_buffer = min(cash_buffer, 1.0 - core_pct - gold_pct)
-                
-                equity_sleeve = 1 - core_pct - gold_pct - cash_buffer
-                equity_amt = inv_amount * equity_sleeve
-                core_amt = inv_amount * core_pct
-                gold_amt = inv_amount * gold_pct
-                cash_amt = inv_amount * cash_buffer
-                
-                df_sel['Amt'] = df_sel['Weight'] * equity_amt
-                df_sel['Shares'] = np.floor(df_sel['Amt'] / df_sel['Price']).astype(int)
-                df_sel['Invested'] = df_sel['Shares'] * df_sel['Price']
-                df_sel['Stop'] = df_sel['Price'] - (stop_mult * df_sel['ATR'])
-                
-                st.write("### Summary")
-                col_s1, col_s2, col_s3 = st.columns(3)
-                col_s1.metric("Total Capital", f"₹{inv_amount:,.0f}")
-                col_s2.metric("Equity Invested", f"₹{df_sel['Invested'].sum():,.0f}")
-                col_s3.metric("Core + Gold + Cash", f"₹{core_amt + gold_amt + cash_amt:,.0f}")
-                
-                fig_pie = px.pie(values=[df_sel['Invested'].sum(), core_amt, gold_amt, cash_amt], 
-                                 names=['Equity', 'Core ETF', 'Gold', 'Cash'], hole=0.5)
+
+                sector_limit = max(
+                    1,
+                    int(math.ceil(max_sec_w * num_pos))
+                )
+
+                for _, candidate in df_elig.iterrows():
+
+                    sector = candidate["Sector"]
+
+                    if sector_counts.get(sector, 0) < sector_limit:
+                        selected.append(candidate)
+                        sector_counts[sector] = (
+                            sector_counts.get(sector, 0) + 1
+                        )
+
+                    if len(selected) >= num_pos:
+                        break
+
+                # If sector limits leave positions unfilled,
+                # fill them with the next highest-scoring stocks.
+                selected_symbols = {
+                    item["Stock"] for item in selected
+                }
+
+                if len(selected) < num_pos:
+                    for _, candidate in df_elig.iterrows():
+                        if candidate["Stock"] in selected_symbols:
+                            continue
+
+                        selected.append(candidate)
+                        selected_symbols.add(candidate["Stock"])
+
+                        if len(selected) >= num_pos:
+                            break
+
+                df_sel = pd.DataFrame(selected).reset_index(drop=True)
+
+                if df_sel.empty:
+                    st.error("Portfolio selection returned no stocks.")
+                    st.stop()
+
+                # ------------------------------------------
+                # WEIGHTING
+                # ------------------------------------------
+                # Inverse-volatility allocation.
+                inv_vol = 1 / df_sel["Vol"].clip(lower=0.01)
+                raw_weights = inv_vol / inv_vol.sum()
+
+                # Ensure the maximum weight does not make
+                # a fully invested portfolio mathematically impossible.
+                effective_max_w = max(
+                    max_w,
+                    1 / len(df_sel)
+                )
+
+                df_sel["Weight"] = cap_weights(
+                    raw_weights.tolist(),
+                    effective_max_w
+                )
+
+                # Normalize against floating-point rounding.
+                df_sel["Weight"] = (
+                    df_sel["Weight"] / df_sel["Weight"].sum()
+                )
+
+                # ------------------------------------------
+                # DEPLOY THE FULL AVAILABLE AMOUNT
+                # ------------------------------------------
+                # No intentional cash buffer, ETF sleeve or gold sleeve.
+                df_sel["Target Amount"] = (
+                    df_sel["Weight"] * float(inv_amount)
+                )
+
+                df_sel["Shares"] = np.floor(
+                    df_sel["Target Amount"] / df_sel["Price"]
+                ).astype(int)
+
+                df_sel["Invested"] = (
+                    df_sel["Shares"] * df_sel["Price"]
+                )
+
+                # Distribute remaining money into additional shares.
+                # Prioritize stocks furthest below their target allocation.
+                remaining = round(
+                    float(inv_amount) - df_sel["Invested"].sum(), 2
+                )
+
+                max_iterations = 10000
+                iteration = 0
+
+                while remaining > 0 and iteration < max_iterations:
+
+                    iteration += 1
+
+                    df_sel["Remaining Target"] = (
+                        df_sel["Target Amount"] - df_sel["Invested"]
+                    )
+
+                    affordable = df_sel[
+                        df_sel["Price"] <= remaining
+                    ].copy()
+
+                    if affordable.empty:
+                        break
+
+                    affordable = affordable.sort_values(
+                        "Remaining Target",
+                        ascending=False
+                    )
+
+                    bought = False
+
+                    for idx in affordable.index:
+
+                        share_price = float(df_sel.loc[idx, "Price"])
+
+                        if share_price <= remaining:
+                            df_sel.loc[idx, "Shares"] += 1
+                            df_sel.loc[idx, "Invested"] += share_price
+                            remaining = round(
+                                remaining - share_price, 2
+                            )
+                            bought = True
+                            break
+
+                    if not bought:
+                        break
+
+                df_sel["Stop"] = (
+                    df_sel["Price"] - stop_mult * df_sel["ATR"]
+                )
+
+                total_invested = float(df_sel["Invested"].sum())
+                uninvested = round(
+                    float(inv_amount) - total_invested, 2
+                )
+
+                actual_weight_total = (
+                    total_invested / inv_amount
+                    if inv_amount > 0 else 0
+                )
+
+                # ------------------------------------------
+                # PORTFOLIO SUMMARY
+                # ------------------------------------------
+                st.write("### Portfolio Summary")
+
+                c1, c2, c3, c4 = st.columns(4)
+
+                c1.metric(
+                    "Investment Budget",
+                    f"₹{inv_amount:,.0f}"
+                )
+
+                c2.metric(
+                    "Actually Invested",
+                    f"₹{total_invested:,.2f}"
+                )
+
+                c3.metric(
+                    "Amount Remaining",
+                    f"₹{uninvested:,.2f}"
+                )
+
+                c4.metric(
+                    "Capital Deployed",
+                    f"{actual_weight_total * 100:.2f}%"
+                )
+
+                if uninvested > 0:
+                    st.warning(
+                        f"₹{uninvested:,.2f} could not buy another whole "
+                        "share at the current prices. This is a share-unit "
+                        "constraint, not an intentional cash reserve."
+                    )
+                else:
+                    st.success("100% of the investment budget is deployed.")
+
+                fig_pie = px.pie(
+                    df_sel[df_sel["Invested"] > 0],
+                    values="Invested",
+                    names="Stock",
+                    hole=0.45,
+                    title="Actual Portfolio Allocation"
+                )
+
+                fig_pie.update_layout(template="plotly_dark")
                 st.plotly_chart(fig_pie, use_container_width=True)
-                
-                st.write("### Reality Check (Historical Risk)")
+
+                # ------------------------------------------
+                # PORTFOLIO HOLDINGS
+                # ------------------------------------------
+                st.write("### Recommended Holdings")
+
+                df_display = df_sel[
+                    [
+                        "Stock", "Sector", "Price",
+                        "Weight", "Shares", "Invested",
+                        "Stop", "Momentum", "3M %",
+                        "RSI", "Score"
+                    ]
+                ].copy()
+
+                df_display["Weight"] = (
+                    df_display["Invested"] / inv_amount * 100
+                ).round(2).astype(str) + "%"
+
+                for col in [
+                    "Price", "Invested", "Stop",
+                    "Momentum", "3M %", "RSI", "Score"
+                ]:
+                    df_display[col] = df_display[col].round(2)
+
+                st.dataframe(
+                    df_display,
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+                st.download_button(
+                    "⬇️ Download Portfolio CSV",
+                    df_display.to_csv(index=False),
+                    file_name="khaata_portfolio.csv",
+                    mime="text/csv"
+                )
+
+                # ------------------------------------------
+                # HISTORICAL RISK CHECK
+                # ------------------------------------------
+                st.write("### Reality Check — Historical Risk")
+
                 try:
-                    nifty_df = yf.download("^NSEI", period="5y", interval="1d", progress=False)
-                    if isinstance(nifty_df.columns, pd.MultiIndex): nifty_df.columns = nifty_df.columns.get_level_values(0)
-                    nifty_close = nifty_df['Close'].squeeze().dropna()
+                    nifty_df = yf.download(
+                        "^NSEI",
+                        period="5y",
+                        interval="1d",
+                        progress=False,
+                        auto_adjust=True
+                    )
 
-                    p_closes = pd.DataFrame({row['Stock']: p_data_local[row['Stock']]['Close'] for _, row in df_sel.iterrows()}).dropna()
-                    p_rets = (p_closes.pct_change() * df_sel.set_index('Stock')['Weight']).sum(axis=1).dropna()
-                    
-                    nifty_rets = nifty_close.pct_change().tail(len(p_rets)).dropna()
-                    p_rets = p_rets.tail(len(nifty_rets))
-                    
-                    cum_ret = (1 + p_rets).cumprod()
-                    roll_1m = (cum_ret / cum_ret.shift(21) - 1).min()
-                    roll_3m = (cum_ret / cum_ret.shift(63) - 1).min()
-                    max_dd = calc_max_drawdown(p_rets)
-                    ann_vol = p_rets.std() * np.sqrt(252)
-                    beta = np.cov(p_rets, nifty_rets)[0,1] / np.var(nifty_rets)
-                    
-                    c1, c2, c3, c4, c5 = st.columns(5)
-                    c1.metric("Worst 1M", f"{roll_1m*100:.1f}%", f"₹{roll_1m*equity_amt:,.0f}")
-                    c2.metric("Worst 3M", f"{roll_3m*100:.1f}%", f"₹{roll_3m*equity_amt:,.0f}")
-                    c3.metric("Max Drawdown", f"{max_dd*100:.1f}%", f"₹{max_dd*equity_amt:,.0f}")
-                    c4.metric("Ann. Volatility", f"{ann_vol*100:.1f}%")
-                    c5.metric("Beta", f"{beta:.2f}")
-                    st.caption("Historical risk of today's picks. NOT a return forecast (look-ahead bias).")
+                    if isinstance(nifty_df.columns, pd.MultiIndex):
+                        nifty_df.columns = nifty_df.columns.get_level_values(0)
+
+                    nifty_close = (
+                        nifty_df["Close"].squeeze().dropna()
+                    )
+
+                    selected_closes = {}
+
+                    for _, holding in df_sel.iterrows():
+                        stock_data = p_data_local.get(holding["Stock"])
+
+                        if stock_data is not None:
+                            selected_closes[holding["Stock"]] = (
+                                stock_data["Close"]
+                            )
+
+                    p_closes = pd.DataFrame(selected_closes).dropna()
+
+                    if (
+                        len(p_closes) > 63
+                        and len(nifty_close) > 63
+                    ):
+
+                        weights = (
+                            df_sel.set_index("Stock")["Weight"]
+                        )
+
+                        portfolio_returns = (
+                            p_closes.pct_change()
+                            .mul(weights, axis=1)
+                            .sum(axis=1)
+                            .dropna()
+                        )
+
+                        common = pd.concat(
+                            [
+                                portfolio_returns.rename("Portfolio"),
+                                nifty_close.pct_change().rename("Nifty")
+                            ],
+                            axis=1,
+                            join="inner"
+                        ).dropna()
+
+                        if len(common) > 63:
+
+                            p_rets = common["Portfolio"]
+                            n_rets = common["Nifty"]
+
+                            cumulative = (1 + p_rets).cumprod()
+
+                            roll_1m = (
+                                cumulative / cumulative.shift(21) - 1
+                            ).min()
+
+                            roll_3m = (
+                                cumulative / cumulative.shift(63) - 1
+                            ).min()
+
+                            max_dd = calc_max_drawdown(p_rets)
+                            ann_vol = p_rets.std() * np.sqrt(252)
+
+                            nifty_variance = n_rets.var()
+
+                            beta = (
+                                np.cov(p_rets, n_rets)[0, 1]
+                                / nifty_variance
+                                if nifty_variance > 0 else np.nan
+                            )
+
+                            r1, r2, r3, r4, r5 = st.columns(5)
+
+                            r1.metric(
+                                "Worst 1M",
+                                f"{roll_1m * 100:.1f}%",
+                                f"₹{roll_1m * total_invested:,.0f}"
+                            )
+
+                            r2.metric(
+                                "Worst 3M",
+                                f"{roll_3m * 100:.1f}%",
+                                f"₹{roll_3m * total_invested:,.0f}"
+                            )
+
+                            r3.metric(
+                                "Max Drawdown",
+                                f"{max_dd * 100:.1f}%",
+                                f"₹{max_dd * total_invested:,.0f}"
+                            )
+
+                            r4.metric(
+                                "Annualised Volatility",
+                                f"{ann_vol * 100:.1f}%"
+                            )
+
+                            r5.metric(
+                                "Beta vs Nifty",
+                                f"{beta:.2f}" if np.isfinite(beta) else "N/A"
+                            )
+
+                            st.caption(
+                                "Historical risk of today's selected stocks. "
+                                "This is not a return forecast and may contain "
+                                "look-ahead and survivorship bias."
+                            )
+
+                        else:
+                            st.info(
+                                "Not enough overlapping historical data "
+                                "to calculate portfolio risk."
+                            )
+
+                    else:
+                        st.info(
+                            "Insufficient historical data for the risk check."
+                        )
+
                 except Exception as e:
-                    st.warning(f"Could not compute backtest: {e}")
+                    st.warning(
+                        f"Could not calculate historical risk: {e}"
+                    )
 
-                df_display = df_sel[['Stock', 'Sector', 'Price', 'Weight', 'Shares', 'Invested', 'Stop', 'Momentum', '3M %', 'RSI']].copy()
-                df_display['Weight'] = df_display['Weight'].apply(lambda x: f"{x*100:.1f}%")
-                df_display['Stop'] = df_display['Stop'].round(1)
-                
-                st.dataframe(df_display, hide_index=True, use_container_width=True)
-                
-                if st.button("📤 Send Plan to Telegram"):
-                    msg = f"<b>💼 Portfolio Plan (₹{inv_amount:,.0f})</b>\nRisk: {risk}\n\n"
-                    for _, r in df_sel.iterrows():
-                        msg += f"• <b>{r['Stock']}</b>: {r['Shares']} sh @ ₹{r['Price']} (Stop: ₹{r['Stop']:.1f})\n"
-                    success, err = send_telegram_message(tg_token, tg_chat_id, msg)
-                    if success: st.success("✅ Sent to Telegram!")
-                    else: st.error(f"❌ Error: {err}")
+                # ------------------------------------------
+                # TELEGRAM
+                # ------------------------------------------
+                if st.button(
+                    "📤 Send Portfolio Plan to Telegram",
+                    key="pb_telegram"
+                ):
+
+                    msg = (
+                        f"<b>💼 Khaata Portfolio Plan</b>\n"
+                        f"Budget: ₹{inv_amount:,.0f}\n"
+                        f"Invested: ₹{total_invested:,.2f}\n"
+                        f"Remaining: ₹{uninvested:,.2f}\n"
+                        f"Risk: {risk}/10\n"
+                        f"Horizon: {horizon}\n\n"
+                    )
+
+                    for _, holding in df_sel.iterrows():
+                        if holding["Shares"] > 0:
+                            msg += (
+                                f"• <b>{holding['Stock']}</b>: "
+                                f"{holding['Shares']} shares "
+                                f"@ ₹{holding['Price']:.2f} "
+                                f"(Invested ₹{holding['Invested']:.2f}, "
+                                f"Stop ₹{holding['Stop']:.2f})\n"
+                            )
+
+                    success, err = send_telegram_message(
+                        tg_token,
+                        tg_chat_id,
+                        msg
+                    )
+
+                    if success:
+                        st.success("Portfolio plan sent to Telegram.")
+                    else:
+                        st.error(f"Telegram error: {err}")
 
             except Exception as e:
                 st.error(f"❌ Failed to build portfolio: {e}")
 
-else:
-
-    st.info(
-        "Click the button above to download market data and build your scanner."
-    )
