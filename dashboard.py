@@ -179,7 +179,6 @@ if st.button("🚀 Fetch Nifty 500 Data & Build Dashboard"):
         st.session_state.df = df_res
         st.session_state.p_data = p_data
         st.session_state.nifty_close = nifty_close
-        # Breadth calculation (% of stocks above 200 SMA)
         st.session_state.breadth = (df_res['Above200'].sum() / len(df_res)) * 100 if len(df_res) > 0 else 50
         st.success(f"✅ Successfully downloaded {len(results)} stocks!")
 
@@ -311,12 +310,11 @@ if 'df' in st.session_state and not st.session_state.df.empty:
         if 'sig_df' in st.session_state:
             st.dataframe(st.session_state.sig_df, use_container_width=True, hide_index=True)
 
-    # --- TAB 7: PORTFOLIO BUILDER (NEW) ---
+    # --- TAB 7: PORTFOLIO BUILDER ---
     with tab7:
         st.subheader("💼 Portfolio Builder")
         st.caption("Not investment advice. This is a quantitative allocation tool.")
         
-        # Inputs
         col_in1, col_in2, col_in3 = st.columns(3)
         with col_in1:
             inv_amount = st.number_input("Investment Amount (₹)", min_value=25000, value=500000, step=25000, key="pb_amount")
@@ -333,17 +331,15 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                 num_pos = int(interpolate(risk, 18, 13, 10))
                 max_w = interpolate(risk, 0.07, 0.10, 0.15)
                 max_sec_w = interpolate(risk, 0.20, 0.25, 0.35)
-                vol_cap = interpolate(risk, 0.25, 0.40, 1.0) # 1.0 = none
+                vol_cap = interpolate(risk, 0.25, 0.40, 1.0)
                 liq_floor = interpolate(risk, 50, 20, 10)
                 stop_mult = interpolate(risk, 3.0, 2.5, 2.0)
                 cash_buffer = interpolate(risk, 0.10, 0.05, 0.0)
                 
-                # Core Share Tapering
                 if risk <= 3: core_pct = 0.50
                 elif risk <= 7: core_pct = 0.25
-                else: core_pct = interpolate(risk, 0, 0.10, 0) # 8=0.10, 10=0
+                else: core_pct = interpolate(risk, 0, 0.10, 0)
                 
-                # Gold logic
                 gold_pct = 0.0
                 try:
                     gold_df = yf.download("GC=F", period="1y", interval="1d", progress=False)
@@ -352,31 +348,28 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                 except: gold_trend_up = False
                 if gold_trend_up and risk <= 5: gold_pct = 0.10
                 
-                # Show Risk Params
                 st.write("**Risk Parameters Applied:**")
-                st.dataframe(pd.DataFrame([{
+                params_dict = {
                     "Positions": num_pos, "Max Stock %": f"{max_w*100:.1f}%", "Max Sector %": f"{max_sec_w*100:.1f}%",
                     "Vol Cap": "None" if vol_cap >= 1.0 else f"{vol_cap*100:.0f}%", "Liq Floor (₹Cr)": f"{liq_floor:.0f}",
                     "Stop Mult": f"{stop_mult:.1f}x ATR", "Cash Buffer": f"{cash_buffer*100:.0f}%", 
                     "Core ETF": f"{core_pct*100:.0f}%", "Gold Sleeve": f"{gold_pct*100:.0f}%"
-                })]), hide_index=True)
+                }
+                st.dataframe(pd.DataFrame([params_dict]), hide_index=True)
 
-                # 2. Eligible Universe & Scoring
+                # 2. Scoring
                 eligible = []
                 for _, row in df.iterrows():
                     sym = row['Stock']
                     df_p = p_data.get(sym)
                     if df_p is None or len(df_p) < 252: continue
                     
-                    # Volatility & Liquidity
                     vol_1y = df_p['Close'].pct_change().tail(252).std() * np.sqrt(252)
                     liq_cr = (df_p['Close'] * df_p['Volume']).tail(20).mean() / 10000000
                     
-                    # Relaxation logic flags
                     relax_a = relax_b = relax_c = relax_d = False
                     
                     while True:
-                        # Filters
                         pass_vol = vol_1y <= vol_cap if not relax_a else vol_1y <= (vol_cap + 0.10)
                         pass_liq = liq_cr >= liq_floor if not relax_b else liq_cr >= (liq_floor / 2)
                         pass_rs = row['RS_3M'] > 0 if not relax_c else True
@@ -384,7 +377,6 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                         
                         if pass_vol and pass_liq and pass_rs and pass_above200:
                             break
-                        # Relax sequentially
                         if not relax_a: relax_a = True
                         elif not relax_b: relax_b = True
                         elif not relax_c: relax_c = True
@@ -392,7 +384,6 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                         else: break
                         
                     if pass_vol and pass_liq and pass_rs and pass_above200:
-                        # Scoring
                         score = 0
                         rsi = ta.momentum.RSIIndicator(df_p['Close'], window=14).rsi().iloc[-1]
                         
@@ -406,7 +397,6 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                             max_dd = calc_max_drawdown(df_p['Close'].pct_change().tail(756))
                             score = (0.35 * (consistency/3)) + (0.35 * (1 - abs(max_dd))) + (0.30 * (1 - vol_1y))
                             
-                        # Risk Tilt
                         low_vol_score = 1 - vol_1y
                         vol_weight = ((10 - risk) / 10) * 0.4
                         score = (score * (1 - vol_weight)) + (low_vol_score * vol_weight)
@@ -424,7 +414,7 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                 
                 df_elig = pd.DataFrame(eligible).sort_values(by="Score", ascending=False)
                 
-                # 3. Construction (Sector Caps & Weights)
+                # 3. Construction
                 selected = []
                 sector_counts = {}
                 for _, row in df_elig.iterrows():
@@ -435,27 +425,23 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                     if len(selected) >= num_pos: break
                 
                 df_sel = pd.DataFrame(selected)
-                # Inverse Vol Weighting
                 df_sel['InvVol'] = 1 / df_sel['Vol']
                 df_sel['Weight'] = df_sel['InvVol'] / df_sel['InvVol'].sum()
                 
-                # Cap weights
                 final_weights = cap_weights(df_sel['Weight'].tolist(), max_w)
                 df_sel['Weight'] = final_weights
                 
-                # Breadth Overlay
                 if breadth < 40: cash_buffer += 0.20
                 if breadth < 25: cash_buffer += 0.40
-                cash_buffer = min(cash_buffer, 0.9) # Max 90% cash
+                max_allowed_cash = max(0.0, 1.0 - core_pct - gold_pct)
+                cash_buffer = min(cash_buffer, max_allowed_cash)
                 
-                # Sleeve Allocation
                 equity_sleeve = 1 - core_pct - gold_pct - cash_buffer
                 equity_amt = inv_amount * equity_sleeve
                 core_amt = inv_amount * core_pct
                 gold_amt = inv_amount * gold_pct
                 cash_amt = inv_amount * cash_buffer
                 
-                # Final Stock Allocations
                 df_sel['Amt'] = df_sel['Weight'] * equity_amt
                 df_sel['Shares'] = np.floor(df_sel['Amt'] / df_sel['Price']).astype(int)
                 df_sel['Invested'] = df_sel['Shares'] * df_sel['Price']
@@ -470,13 +456,12 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                 col_s3.metric("Core + Gold + Cash", f"₹{core_amt + gold_amt + cash_amt:,.0f}")
                 col_s4.metric("Leftover Cash", f"₹{inv_amount - df_sel['Invested'].sum() - core_amt - gold_amt - cash_amt:,.0f}")
                 
-                # Donut Chart
                 fig_pie = px.pie(values=[df_sel['Invested'].sum(), core_amt, gold_amt, cash_amt], 
                                  names=['Equity', 'Core ETF', 'Gold', 'Cash'],
                                  title="Portfolio Allocation", hole=0.5, color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig_pie, use_container_width=True)
                 
-                # 4. Reality Check (5Y Backtest of basket)
+                # 4. Reality Check
                 st.write("### Reality Check (Historical 5Y Risk)")
                 try:
                     port_closes = pd.DataFrame({row['Stock']: p_data[row['Stock']]['Close'] for _, row in df_sel.iterrows()}).dropna()
@@ -503,7 +488,7 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                 except Exception as e:
                     st.warning(f"Could not compute backtest: {e}")
                 
-                # 5. Detailed Table
+                # 5. Table & Actions
                 st.write("### Execution Plan")
                 df_display = df_sel[['Stock', 'Sector', 'Price', 'Weight', 'Shares', 'Invested', 'Stop', 'T2R', 'Momentum', 'RS_3M', 'RSI', 'Liq']].copy()
                 df_display['Weight'] = df_display['Weight'].apply(lambda x: f"{x*100:.1f}%")
@@ -513,15 +498,14 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                 df_display['RS_3M'] = df_display['RS_3M'].round(1)
                 st.dataframe(df_display, hide_index=True, use_container_width=True)
                 
-                # 6. Telegram & Download
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
                     csv = df_display.to_csv(index=False).encode('utf-8')
                     st.download_button("📥 Download CSV", csv, "portfolio_plan.csv", "text/csv", key="pb_dl")
                 with col_btn2:
-                    if st.button("📤 Send Plan to Telegram"):
+                    if st.button("📤 Send Plan to Telegram", key="pb_tg"):
                         msg = f"<b>💼 Portfolio Plan (₹{inv_amount:,.0f})</b>\nHorizon: {horizon} | Risk: {risk}\n\n"
-                        for _, r in df_sel.iterrows():
+                        for _, r in df_sel.sort_values(by="Weight", ascending=False).iterrows():
                             msg += f"• <b>{esc(r['Stock'])}</b>: {r['Shares']} sh @ ₹{r['Price']} (Stop: ₹{r['Stop']:.1f})\n"
                         success, err = send_telegram_message(tg_token, tg_chat_id, msg)
                         if success: st.success("✅ Sent to Telegram!")
@@ -529,3 +513,6 @@ if 'df' in st.session_state and not st.session_state.df.empty:
                         
             except Exception as e:
                 st.error(f"❌ Failed to build portfolio: {e}")
+
+else:
+    st.info("👋 Please click 'Fetch Nifty 500 Data' above to load data and access the Portfolio Builder.")
